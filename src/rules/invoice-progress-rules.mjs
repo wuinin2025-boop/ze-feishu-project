@@ -33,6 +33,22 @@ export function derivePaymentStatus({
   return '待回款';
 }
 
+export function buildProgressKey({ projectNo, executionPeriod, invoiceNo }) {
+  return [projectNo || '未匹配项目', executionPeriod || '未定期次', invoiceNo || '计划'].join('|');
+}
+
+export function deriveOverallStatus({ invoiceStatus, paymentStatus, diffStatus }) {
+  if (diffStatus === '金额异常待核对') return '金额异常待核对';
+  if (paymentStatus === '回款逾期') return '回款逾期';
+  if (invoiceStatus === '开票逾期') return '开票逾期';
+  if (invoiceStatus === '即将到期开票') return '即将到期开票';
+  if (paymentStatus === '部分回款') return '部分回款';
+  if (paymentStatus === '待回款') return '待回款';
+  if (paymentStatus === '已回款') return '已回款';
+  if (invoiceStatus === '未到期') return '未到期';
+  return '待人工补充';
+}
+
 export function buildOldProjectNodes(project, invoices) {
   const sortedInvoices = [...invoices].sort((left, right) => (left.invoiceDate || 0) - (right.invoiceDate || 0));
   const nodes = sortedInvoices.map((invoice, index) => ({
@@ -102,4 +118,27 @@ export function buildSplitInvoiceNodes(planRows, invoices) {
     invoiceNo: invoice.invoiceNo,
     diffStatus: '实际拆分开票',
   }));
+}
+
+export function collapseReversedInvoices(invoices) {
+  const remaining = [];
+  const used = new Set();
+  for (let index = 0; index < invoices.length; index += 1) {
+    if (used.has(index)) continue;
+    const invoice = invoices[index];
+    if ((invoice.invoiceAmount || 0) < 0) {
+      const matchIndex = remaining.findIndex((candidate) => (
+        Math.abs((candidate.invoiceAmount || 0) + (invoice.invoiceAmount || 0)) < 0.01
+        && !used.has(candidate.__sourceIndex)
+      ));
+      if (matchIndex >= 0) {
+        used.add(remaining[matchIndex].__sourceIndex);
+        used.add(index);
+        remaining.splice(matchIndex, 1);
+        continue;
+      }
+    }
+    remaining.push({ ...invoice, __sourceIndex: index });
+  }
+  return remaining.map(({ __sourceIndex, ...invoice }) => invoice);
 }
