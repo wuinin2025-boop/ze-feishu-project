@@ -3,9 +3,12 @@ import assert from 'node:assert/strict';
 
 import {
   buildOldProjectNodes,
+  buildProgressKey,
   buildSplitInvoiceNodes,
   classifyApplication,
+  collapseReversedInvoices,
   deriveInvoiceStatus,
+  deriveOverallStatus,
   derivePaymentStatus,
 } from '../src/rules/invoice-progress-rules.mjs';
 
@@ -53,4 +56,26 @@ test('actual split invoices create actual invoice count rows', () => {
   assert.deepEqual(rows.map((row) => row.currentPlanAmount), [200, 300, 500]);
   assert.deepEqual(rows.map((row) => row.currentPlanCount), [3, 3, 3]);
   assert.equal(rows[0].diffStatus, '实际拆分开票');
+});
+
+test('progress key is stable for actual and plan-only rows', () => {
+  assert.equal(buildProgressKey({ projectNo: 'P1', executionPeriod: 2, invoiceNo: 'F2' }), 'P1|2|F2');
+  assert.equal(buildProgressKey({ projectNo: 'P1', executionPeriod: 2 }), 'P1|2|计划');
+});
+
+test('overall status prioritizes amount, payment and invoice alerts', () => {
+  assert.equal(deriveOverallStatus({ diffStatus: '金额异常待核对', invoiceStatus: '已开票', paymentStatus: '已回款' }), '金额异常待核对');
+  assert.equal(deriveOverallStatus({ invoiceStatus: '已开票', paymentStatus: '回款逾期' }), '回款逾期');
+  assert.equal(deriveOverallStatus({ invoiceStatus: '开票逾期', paymentStatus: '待开票' }), '开票逾期');
+  assert.equal(deriveOverallStatus({ invoiceStatus: '即将到期开票', paymentStatus: '待开票' }), '即将到期开票');
+});
+
+test('reversed positive and negative invoices cancel out for progress generation', () => {
+  assert.deepEqual(collapseReversedInvoices([
+    { invoiceNo: 'A', invoiceAmount: 14000 },
+    { invoiceNo: 'B', invoiceAmount: -14000 },
+    { invoiceNo: 'C', invoiceAmount: 300 },
+  ]), [
+    { invoiceNo: 'C', invoiceAmount: 300 },
+  ]);
 });
