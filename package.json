@@ -1,0 +1,12 @@
+{
+  "name": "ze-feishu-project",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "schema:invoice": "node src/feishu/schema.mjs",
+    "sync:invoice": "node src/feishu/sync-invoice-progress.mjs",
+    "verify:invoice": "node src/feishu/verify-invoice-progress.mjs"
+  }
+}
