@@ -143,7 +143,7 @@ async function listFields(client, tableId) {
 async function ensureUserField(client, tableId, fieldName) {
   const fields = await listFields(client, tableId);
   if (fields.some((field) => field.field_name === fieldName)) return fields;
-  if (DRY_RUN) return [...fields, { field_name: fieldName, type: 11, ui_type: 'User' }];
+  if (DRY_RUN) return fields;
   await callJson(client, 'bitable_v1_appTableField_create', {
     path: { app_token: APP_TOKEN, table_id: tableId },
     data: { field_name: fieldName, type: 11, ui_type: 'User', property: { multiple: true } },
@@ -246,9 +246,9 @@ function normalizedPeople(rows) {
   });
 }
 
-function accessUpdates(rows, projectByRecordId, projectByNo, { includeMembers = false } = {}) {
+function accessUpdates(rows, projectByRecordId, projectByNo, { includeMembers = false, linkField = '关联项目' } = {}) {
   return rows.flatMap((row) => {
-    const project = linkIds(row.fields?.['关联项目']).map((id) => projectByRecordId.get(id)).find(Boolean)
+    const project = linkIds(row.fields?.[linkField]).map((id) => projectByRecordId.get(id)).find(Boolean)
       || projectByNo.get(textValue(row.fields?.['项目编号']));
     if (!project) return [];
     const managers = projectManagerPeople({
@@ -328,7 +328,7 @@ function rolePayloads(tables, fieldsByTable) {
       hidden: ['上次当前负责人', '人工确认有效源记录ID', '源记录ID'],
     })],
     [TABLES.leads, editableRole(TABLES.leads, fieldsByTable.get(TABLES.leads), {
-      personRuleFields: ['线索负责人'],
+      personRuleFields: ['线索负责人', '参与人员'],
       editable: ['线索名称', '线索编号', '预计金额', '线索状态', '客户名称', '线索负责人', '参与人员', '最新沟通情况', '下一步计划', '下次跟进日期', '方案链接或附件', '风险或阻碍', '预计立项公司', '转项目状态', '关联正式项目'],
       allowAdd: true,
     })],
@@ -356,11 +356,9 @@ function rolePayloads(tables, fieldsByTable) {
   ]);
   const employeeRoles = new Map([
     [TABLES.leads, readableRole(TABLES.leads, fieldsByTable.get(TABLES.leads), { personRuleFields: ['参与人员'] })],
-    [TABLES.tasks, editableRole(TABLES.tasks, fieldsByTable.get(TABLES.tasks), {
+    [TABLES.tasks, readableRole(TABLES.tasks, fieldsByTable.get(TABLES.tasks), {
       personRuleFields: [PROJECT_MEMBERS_FIELD, '任务执行人员'],
-      editable: ['任务名称', '关联项目', '任务执行人员', '开始时间', '结束时间', '优先级', '预计工时（小时）', '实际工时（小时）', '实际完成时间', '任务状态', '风险等级', '风险或阻碍'],
       hidden: [PERMISSION_HELPER_FIELD],
-      allowAdd: true,
     })],
   ]);
   return {
@@ -429,16 +427,18 @@ try {
   const tables = await listTables(client);
   const fieldsByTable = new Map();
   for (const table of tables) fieldsByTable.set(table.table_id, await listFields(client, table.table_id));
+  fieldsByTable.set(TABLES.leads, await ensureUserField(client, TABLES.leads, PERMISSION_HELPER_FIELD));
   fieldsByTable.set(TABLES.tasks, await ensureUserField(client, TABLES.tasks, PERMISSION_HELPER_FIELD));
   fieldsByTable.set(TABLES.tasks, await ensureUserField(client, TABLES.tasks, PROJECT_MEMBERS_FIELD));
   fieldsByTable.set(TABLES.invoiceProgress, await ensureUserField(client, TABLES.invoiceProgress, PERMISSION_HELPER_FIELD));
   fieldsByTable.set(TABLES.oldPlan, await ensureUserField(client, TABLES.oldPlan, PERMISSION_HELPER_FIELD));
   fieldsByTable.set(TABLES.supplierPayments, await ensureUserField(client, TABLES.supplierPayments, PERMISSION_HELPER_FIELD));
 
-  const [peopleRows, projectRows, managerChangeRows, taskRows, oldPlanRows, supplierRows] = await Promise.all([
+  const [peopleRows, projectRows, managerChangeRows, leadRows, taskRows, oldPlanRows, supplierRows] = await Promise.all([
     searchAll(client, APP_TOKEN, TABLES.people, ['员工姓名', '飞书用户', '系统身份', '是否在职', '权限角色状态']),
     searchAll(client, APP_TOKEN, TABLES.overview, ['项目编号', '当前项目负责人', '交接协同人', '项目参与人员', '负责人交接状态']),
     searchAll(client, APP_TOKEN, TABLES.managerChanges, ['变更记录编号', '项目编号', '新当前负责人', '生效日期', '创建时间', '关联项目']),
+    searchAll(client, APP_TOKEN, TABLES.leads, existingNames(fieldsByTable.get(TABLES.leads), ['关联正式项目', PERMISSION_HELPER_FIELD])),
     searchAll(client, APP_TOKEN, TABLES.tasks, ['关联项目', '项目编号', PERMISSION_HELPER_FIELD, PROJECT_MEMBERS_FIELD]),
     searchAll(client, APP_TOKEN, TABLES.oldPlan, ['关联项目', '项目编号', PERMISSION_HELPER_FIELD]),
     searchAll(client, APP_TOKEN, TABLES.supplierPayments, ['关联项目', '项目编号', PERMISSION_HELPER_FIELD]),
@@ -492,11 +492,13 @@ try {
   const projectByRecordId = new Map(refreshedProjects.map((project) => [project.record_id, project]));
   const projectByNo = new Map(refreshedProjects.map((project) => [textValue(project.fields?.['项目编号']), project]).filter(([key]) => key));
   const helperUpdates = {
+    leads: accessUpdates(leadRows, projectByRecordId, projectByNo, { linkField: '关联正式项目' }),
     tasks: accessUpdates(taskRows, projectByRecordId, projectByNo, { includeMembers: true }),
     oldPlan: accessUpdates(oldPlanRows, projectByRecordId, projectByNo),
     supplierPayments: accessUpdates(supplierRows, projectByRecordId, projectByNo),
   };
   const helperUpdated = {
+    leads: await batchUpdate(client, TABLES.leads, helperUpdates.leads),
     tasks: await batchUpdate(client, TABLES.tasks, helperUpdates.tasks),
     oldPlan: await batchUpdate(client, TABLES.oldPlan, helperUpdates.oldPlan),
     supplierPayments: await batchUpdate(client, TABLES.supplierPayments, helperUpdates.supplierPayments),

@@ -28,8 +28,8 @@ test('role memberships follow identity and remove departed people', () => {
     { userId: 'ou_left', identity: '项目负责人', employmentStatus: '离职' },
   ]);
   assert.deepEqual([...result.admin], ['ou_admin']);
-  assert.deepEqual([...result.manager].sort(), ['ou_admin', 'ou_manager'].sort());
-  assert.deepEqual([...result.employee].sort(), ['ou_admin', 'ou_employee', 'ou_manager'].sort());
+  assert.deepEqual([...result.manager], ['ou_manager']);
+  assert.deepEqual([...result.employee], ['ou_employee']);
 });
 
 test('permission role status detects stale roles', () => {
@@ -37,7 +37,7 @@ test('permission role status detects stale roles', () => {
     employmentStatus: '在职',
     identity: '项目负责人',
     userId: 'ou_manager',
-    roleMemberships: memberships({ manager: ['ou_manager'], employee: ['ou_manager'] }),
+    roleMemberships: memberships({ manager: ['ou_manager'] }),
   }), '已同步');
   assert.equal(derivePermissionRoleStatus({
     employmentStatus: '离职',

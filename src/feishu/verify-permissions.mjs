@@ -6,6 +6,7 @@ import { callJson, connectFeishu, searchAll, textValue } from './client.mjs';
 
 const TABLES = {
   overview: 'tblTuTJJDEQK6XcZ',
+  tasks: 'tblMqbOebPtzjEdH',
   invoiceProgress: 'tblA4obaIS0jeylo',
   invoiceCollection: 'tblVnpNCeYhtKCD0',
   oldPlan: 'tblOJRhUniTa1yRU',
@@ -93,6 +94,9 @@ try {
   assert.deepEqual(rulePersonFields(managerInvoiceProgress.rec_rule).sort(), ['当前权限负责人', '权限_可管理人员'].sort());
   const managerOldPlan = managerTables.get(TABLES.oldPlan);
   assert.equal(managerOldPlan.field_perm?.['权限_可管理人员'], 1);
+  const employeeTasks = employeeTables.get(TABLES.tasks);
+  assert.equal(employeeTasks.table_perm, 1);
+  assert.deepEqual(rulePersonFields(employeeTasks.rec_rule).sort(), ['任务执行人员', '项目成员'].sort());
   assert.equal(managerTables.get(TABLES.invoiceCollection)?.table_perm ?? 0, 0);
   assert.equal(employeeTables.get(TABLES.invoiceProgress)?.table_perm ?? 0, 0);
   assert.equal(employeeTables.get(TABLES.oldPlan)?.table_perm ?? 0, 0);
@@ -126,6 +130,10 @@ try {
   });
   assert.equal(activeUnsynced.length, 0);
   assert.equal(departedWithRoles.length, 0);
+  const managerEmployeeOverlap = [...managerMembers].filter((id) => employeeMembers.has(id));
+  const adminLowerRoleOverlap = [...adminMembers].filter((id) => managerMembers.has(id) || employeeMembers.has(id));
+  assert.equal(managerEmployeeOverlap.length, 0);
+  assert.equal(adminLowerRoleOverlap.length, 0);
 
   console.log(JSON.stringify({
     pass: true,
@@ -133,6 +141,9 @@ try {
     manager_can_read_own_invoice_progress: true,
     manager_cannot_edit_project_owner: true,
     employee_finance_perm: 0,
+    employee_project_progress_read_only: true,
+    manager_employee_overlap: managerEmployeeOverlap.length,
+    admin_lower_role_overlap: adminLowerRoleOverlap.length,
     active_unsynced_people: activeUnsynced.length,
     active_sync_failed_people: activeSyncFailed.length,
     departed_people_with_roles: departedWithRoles.length,
