@@ -7,6 +7,7 @@ import {
   departedManagerHandoff,
   derivePermissionRoleStatus,
   desiredRoleMemberships,
+  latestApplicableManagerChangeByProject,
   projectManagerPeople,
 } from '../rules/permission-rules.mjs';
 import {
@@ -17,6 +18,7 @@ import {
 } from './client.mjs';
 
 const DRY_RUN = process.argv.includes('--dry-run');
+const NOW = Date.now();
 const TABLES = {
   overview: 'tblTuTJJDEQK6XcZ',
   leads: 'tblpvwmE3OHO0nmC',
@@ -266,6 +268,56 @@ function accessUpdates(rows, projectByRecordId, projectByNo, { includeMembers = 
   });
 }
 
+function normalizeManagerChange(row) {
+  const fields = row.fields || {};
+  return {
+    recordId: row.record_id,
+    changeNo: textValue(fields['变更记录编号']),
+    projectNo: textValue(fields['项目编号']),
+    newManagers: peopleValue(fields['新当前负责人']),
+    effectiveAt: Number(fields['生效日期']) || 0,
+    createdAt: Number(fields['创建时间']) || 0,
+    linkedProjectIds: linkIds(fields['关联项目']),
+  };
+}
+
+function managerChangeUpdates(changeRows, projectRows) {
+  const projectByNo = new Map(projectRows
+    .map((project) => [textValue(project.fields?.['项目编号']), project])
+    .filter(([projectNo]) => projectNo));
+  const changes = changeRows.map(normalizeManagerChange);
+  const latestByProject = latestApplicableManagerChangeByProject(changes, { now: NOW });
+  const projectUpdates = [];
+  const changeRecordUpdates = [];
+  const skipped = [];
+
+  for (const change of changes.filter((item) => item.projectNo)) {
+    const project = projectByNo.get(change.projectNo);
+    if (!project) {
+      skipped.push({ record_id: change.recordId, 项目编号: change.projectNo, reason: '项目总览表未找到项目编号' });
+      continue;
+    }
+    if (!change.linkedProjectIds.includes(project.record_id)) {
+      changeRecordUpdates.push({ record_id: change.recordId, fields: { 关联项目: [project.record_id] } });
+    }
+  }
+
+  for (const change of latestByProject.values()) {
+    const project = projectByNo.get(change.projectNo);
+    if (!project) continue;
+
+    const fields = {};
+    if (!samePeople(project.fields?.['当前项目负责人'], change.newManagers)) {
+      fields['当前项目负责人'] = change.newManagers;
+      fields['负责人交接状态'] = '正常';
+    }
+    if (Object.keys(fields).length) projectUpdates.push({ record_id: project.record_id, fields });
+
+  }
+
+  return { projectUpdates, changeRecordUpdates, skipped };
+}
+
 function rolePayloads(tables, fieldsByTable) {
   const tableById = new Map(tables.map((table) => [table.table_id, table]));
   const financialHidden = ['记录标题', '源记录键', '数据来源', '源记录ID', '最后同步时间'];
@@ -383,9 +435,10 @@ try {
   fieldsByTable.set(TABLES.oldPlan, await ensureUserField(client, TABLES.oldPlan, PERMISSION_HELPER_FIELD));
   fieldsByTable.set(TABLES.supplierPayments, await ensureUserField(client, TABLES.supplierPayments, PERMISSION_HELPER_FIELD));
 
-  const [peopleRows, projectRows, taskRows, oldPlanRows, supplierRows] = await Promise.all([
+  const [peopleRows, projectRows, managerChangeRows, taskRows, oldPlanRows, supplierRows] = await Promise.all([
     searchAll(client, APP_TOKEN, TABLES.people, ['员工姓名', '飞书用户', '系统身份', '是否在职', '权限角色状态']),
     searchAll(client, APP_TOKEN, TABLES.overview, ['项目编号', '当前项目负责人', '交接协同人', '项目参与人员', '负责人交接状态']),
+    searchAll(client, APP_TOKEN, TABLES.managerChanges, ['变更记录编号', '项目编号', '新当前负责人', '生效日期', '创建时间', '关联项目']),
     searchAll(client, APP_TOKEN, TABLES.tasks, ['关联项目', '项目编号', PERMISSION_HELPER_FIELD, PROJECT_MEMBERS_FIELD]),
     searchAll(client, APP_TOKEN, TABLES.oldPlan, ['关联项目', '项目编号', PERMISSION_HELPER_FIELD]),
     searchAll(client, APP_TOKEN, TABLES.supplierPayments, ['关联项目', '项目编号', PERMISSION_HELPER_FIELD]),
@@ -393,9 +446,19 @@ try {
   const people = normalizedPeople(peopleRows);
   const peopleById = new Map(people.map((person) => [person.userId, person]).filter(([id]) => id));
 
+  const explicitManagerChanges = managerChangeUpdates(managerChangeRows, projectRows);
+  const managerChangeProjectUpdated = await batchUpdate(client, TABLES.overview, explicitManagerChanges.projectUpdates);
+  const managerChangeRecordUpdated = await batchUpdate(client, TABLES.managerChanges, explicitManagerChanges.changeRecordUpdates);
+  const projectRowsAfterExplicitChanges = explicitManagerChanges.projectUpdates.length && !DRY_RUN
+    ? await searchAll(client, APP_TOKEN, TABLES.overview, ['项目编号', '当前项目负责人', '交接协同人', '项目参与人员', '负责人交接状态'])
+    : projectRows.map((project) => {
+      const update = explicitManagerChanges.projectUpdates.find((item) => item.record_id === project.record_id);
+      return update ? { ...project, fields: { ...project.fields, ...update.fields } } : project;
+    });
+
   const handoffUpdates = [];
   const handoffLogs = [];
-  for (const project of projectRows) {
+  for (const project of projectRowsAfterExplicitChanges) {
     const handoff = departedManagerHandoff({
       managers: peopleValue(project.fields?.['当前项目负责人']),
       handoffs: peopleValue(project.fields?.['交接协同人']),
@@ -422,7 +485,7 @@ try {
 
   const refreshedProjects = handoffUpdates.length && !DRY_RUN
     ? await searchAll(client, APP_TOKEN, TABLES.overview, ['项目编号', '当前项目负责人', '交接协同人', '项目参与人员'])
-    : projectRows.map((project) => {
+    : projectRowsAfterExplicitChanges.map((project) => {
       const update = handoffUpdates.find((item) => item.record_id === project.record_id);
       return update ? { ...project, fields: { ...project.fields, ...update.fields } } : project;
     });
@@ -483,6 +546,22 @@ try {
   console.log(JSON.stringify({
     dry_run: DRY_RUN,
     tables: tables.length,
+    manager_changes: {
+      records: managerChangeRows.length,
+      project_updates_planned: explicitManagerChanges.projectUpdates.length,
+      project_updates_written: managerChangeProjectUpdated,
+      link_updates_planned: explicitManagerChanges.changeRecordUpdates.length,
+      link_updates_written: managerChangeRecordUpdated,
+      skipped: explicitManagerChanges.skipped,
+      samples: explicitManagerChanges.projectUpdates.slice(0, 10).map((update) => {
+        const project = projectRows.find((row) => row.record_id === update.record_id);
+        return {
+          项目编号: textValue(project?.fields?.['项目编号']),
+          新负责人: peopleValue(update.fields['当前项目负责人']).map((person) => person.id),
+          负责人交接状态: update.fields['负责人交接状态'],
+        };
+      }),
+    },
     handoff: {
       planned: handoffUpdates.length,
       updated: handoffUpdated,

@@ -7,6 +7,7 @@ import {
   departedManagerHandoff,
   derivePermissionRoleStatus,
   desiredRoleMemberships,
+  latestApplicableManagerChangeByProject,
   projectManagerPeople,
   uniquePeople,
 } from '../src/rules/permission-rules.mjs';
@@ -95,4 +96,15 @@ test('project manageable people merge manager and handoff users', () => {
     managers: [{ id: 'manager' }],
     handoffs: [{ id: 'handoff' }],
   }), [{ id: 'manager' }, { id: 'handoff' }]);
+});
+
+test('manager change records use the latest effective change per project', () => {
+  const result = latestApplicableManagerChangeByProject([
+    { recordId: 'old', projectNo: 'P1', newManagers: [{ id: 'old_manager' }], effectiveAt: 10, createdAt: 10 },
+    { recordId: 'future', projectNo: 'P1', newManagers: [{ id: 'future_manager' }], effectiveAt: 30, createdAt: 30 },
+    { recordId: 'latest', projectNo: 'P1', newManagers: [{ id: 'latest_manager' }], effectiveAt: 10, createdAt: 20 },
+    { recordId: 'missing_manager', projectNo: 'P2', newManagers: [], effectiveAt: 10, createdAt: 20 },
+  ], { now: 20 });
+  assert.equal(result.get('P1').recordId, 'latest');
+  assert.equal(result.has('P2'), false);
 });

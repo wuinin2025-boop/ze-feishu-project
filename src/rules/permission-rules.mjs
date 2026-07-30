@@ -122,3 +122,17 @@ export function departedManagerHandoff({ managers = [], handoffs = [], peopleByI
 export function projectManagerPeople({ managers = [], handoffs = [] } = {}) {
   return uniquePeople(managers, handoffs);
 }
+
+export function latestApplicableManagerChangeByProject(changes, { now = Date.now() } = {}) {
+  const result = new Map();
+  const applicable = changes
+    .filter((change) => change.projectNo && change.newManagers?.length)
+    .filter((change) => !change.effectiveAt || change.effectiveAt <= now)
+    .sort((left, right) => (
+      (left.effectiveAt || 0) - (right.effectiveAt || 0)
+      || (left.createdAt || 0) - (right.createdAt || 0)
+      || String(left.recordId || '').localeCompare(String(right.recordId || ''))
+    ));
+  for (const change of applicable) result.set(change.projectNo, change);
+  return result;
+}
