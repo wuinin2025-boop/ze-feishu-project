@@ -71,6 +71,10 @@ function compactRows(rows) {
   }));
 }
 
+function linkRecordIds(value) {
+  return Array.isArray(value?.link_record_ids) ? value.link_record_ids : [];
+}
+
 function markdown(report, samples) {
   return `# 项目开票进度试运行验证结果
 
@@ -154,6 +158,8 @@ try {
   const blankKeyRows = progress.filter((row) => !textValue(row.fields?.['源记录键']));
   const manualRows = progress.filter((row) => ['待人工确认', '待人工补充'].includes(textValue(row.fields?.['生成状态'])));
   const splitRows = progress.filter((row) => textValue(row.fields?.['差异状态']) === '实际拆分开票');
+  const autoOldPlanRows = oldPlan.filter((row) => textValue(row.fields?.['源记录键']).startsWith('old-plan|'));
+  const unlinkedOldPlanRows = autoOldPlanRows.filter((row) => linkRecordIds(row.fields?.['关联项目']).length === 0);
 
   const sourceInvoiceReceived = sum(sourceInvoiceRecords, '收款额');
   const collectionReceived = sum(collection, '回款金额');
@@ -165,6 +171,7 @@ try {
   check('发票归集回款金额等于源发票收款额', Math.abs(collectionReceived - sourceInvoiceReceived) < 0.01, `collection=${collectionReceived}, source=${sourceInvoiceReceived}`);
   check('202607270012 样例存在', rows012.length >= 1, `rows=${rows012.length}`);
   check('试运行表有待人工确认/补充视图数据', manualRows.length > 0, `manual=${manualRows.length}`);
+  check('自动生成的旧项目补录行都已关联项目总览表', unlinkedOldPlanRows.length === 0, `unlinked=${unlinkedOldPlanRows.length}`);
 
   const report = {
     pass: failures.length === 0,
@@ -175,6 +182,7 @@ try {
       source_invoices: sourceInvoiceRecords.length,
       manual_confirmation: manualRows.length,
       split_rows: splitRows.length,
+      old_project_plan_unlinked: unlinkedOldPlanRows.length,
     },
     amounts: {
       progress_received: Number(progressReceived.toFixed(2)),
