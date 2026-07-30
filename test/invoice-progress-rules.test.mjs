@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildInvoiceCollectionTitle,
   buildOldProjectNodes,
   buildProgressKey,
   buildSingleLinkField,
   buildSplitInvoiceNodes,
+  buildSyncLogTitle,
   classifyApplication,
   collapseReversedInvoices,
   deriveInvoiceStatus,
@@ -68,6 +70,26 @@ test('single link field uses Feishu write format', () => {
   assert.deepEqual(buildSingleLinkField('rec123'), ['rec123']);
   assert.equal(buildSingleLinkField(''), undefined);
   assert.equal(buildSingleLinkField(undefined), undefined);
+});
+
+test('invoice collection and sync log titles replace blank first fields', () => {
+  assert.equal(
+    buildInvoiceCollectionTitle({
+      sourceName: '集熠开票明细',
+      projectNo: 'E260310YIYI',
+      invoiceNo: 'INV-001',
+      sourceId: 'recA',
+    }),
+    '集熠开票明细|E260310YIYI|INV-001',
+  );
+  assert.equal(
+    buildInvoiceCollectionTitle({ sourceName: '冶堂开票明细', sourceId: 'recB' }),
+    '冶堂开票明细|recB',
+  );
+  assert.equal(
+    buildSyncLogTitle({ runTime: Date.UTC(2026, 6, 30, 4, 0, 0), runType: '项目开票进度同步', result: '成功' }),
+    '2026-07-30 04:00:00|项目开票进度同步|成功',
+  );
 });
 
 test('overall status prioritizes amount, payment and invoice alerts', () => {
