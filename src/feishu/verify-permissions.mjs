@@ -90,12 +90,14 @@ try {
   assert.equal(managerOverview.field_perm?.['项目参与人员'], 3);
   assert.deepEqual(rulePersonFields(managerOverview.rec_rule).sort(), ['交接协同人', '当前项目负责人'].sort());
   const managerInvoiceProgress = managerTables.get(TABLES.invoiceProgress);
-  assert.equal(managerInvoiceProgress.table_perm, 1);
+  assert.equal(managerInvoiceProgress.table_perm, 2);
+  assert.equal(managerInvoiceProgress.allow_add_record, true);
   assert.deepEqual(rulePersonFields(managerInvoiceProgress.rec_rule).sort(), ['当前权限负责人', '权限_可管理人员'].sort());
   const managerOldPlan = managerTables.get(TABLES.oldPlan);
   assert.equal(managerOldPlan.field_perm?.['权限_可管理人员'], 1);
   const employeeTasks = employeeTables.get(TABLES.tasks);
-  assert.equal(employeeTasks.table_perm, 1);
+  assert.equal(employeeTasks.table_perm, 2);
+  assert.equal(employeeTasks.field_perm?.['任务名称'], 3);
   assert.deepEqual(rulePersonFields(employeeTasks.rec_rule).sort(), ['任务执行人员', '项目成员'].sort());
   assert.equal(managerTables.get(TABLES.invoiceCollection)?.table_perm ?? 0, 0);
   assert.equal(employeeTables.get(TABLES.invoiceProgress)?.table_perm ?? 0, 0);
@@ -136,10 +138,10 @@ try {
   console.log(JSON.stringify({
     pass: true,
     table_count: tables.length,
-    manager_can_read_own_invoice_progress: true,
+    manager_can_edit_own_invoice_progress: true,
     manager_cannot_edit_project_owner: true,
     employee_finance_perm: 0,
-    employee_project_progress_read_only: true,
+    employee_project_progress_editable: true,
     admin_lower_role_overlap: adminLowerRoleOverlap.length,
     active_unsynced_people: activeUnsynced.length,
     active_sync_failed_people: activeSyncFailed.length,

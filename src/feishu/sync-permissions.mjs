@@ -118,6 +118,16 @@ function readableRole(tableId, fields, { personRuleFields, hidden = [], fieldPer
   return role;
 }
 
+function editableTableRole(tableId, fields, { personRuleFields, allowAdd = false }) {
+  return {
+    table_id: tableId,
+    table_perm: 2,
+    allow_add_record: allowAdd,
+    allow_delete_record: false,
+    rec_rule: buildPersonRecordRule(personFields(fields, personRuleFields), { permission: 2 }),
+  };
+}
+
 async function listTables(client) {
   const items = [];
   let pageToken;
@@ -337,10 +347,9 @@ function rolePayloads(tables, fieldsByTable) {
       editable: ['任务名称', '关联项目', '任务执行人员', '开始时间', '结束时间', '优先级', '预计工时（小时）', '实际工时（小时）', '实际完成时间', '任务状态', '风险等级', '风险或阻碍'],
       allowAdd: true,
     })],
-    [TABLES.invoiceProgress, readableRole(TABLES.invoiceProgress, fieldsByTable.get(TABLES.invoiceProgress), {
+    [TABLES.invoiceProgress, editableTableRole(TABLES.invoiceProgress, fieldsByTable.get(TABLES.invoiceProgress), {
       personRuleFields: [PERMISSION_HELPER_FIELD, '当前权限负责人'],
-      hidden: ['记录标题', '数据来源', '最后同步时间'],
-      fieldPermissions: false,
+      allowAdd: true,
     })],
     [TABLES.oldPlan, editableRole(TABLES.oldPlan, fieldsByTable.get(TABLES.oldPlan), {
       personRuleFields: [PERMISSION_HELPER_FIELD],
@@ -356,9 +365,11 @@ function rolePayloads(tables, fieldsByTable) {
   ]);
   const employeeRoles = new Map([
     [TABLES.leads, readableRole(TABLES.leads, fieldsByTable.get(TABLES.leads), { personRuleFields: ['参与人员'] })],
-    [TABLES.tasks, readableRole(TABLES.tasks, fieldsByTable.get(TABLES.tasks), {
+    [TABLES.tasks, editableRole(TABLES.tasks, fieldsByTable.get(TABLES.tasks), {
       personRuleFields: [PROJECT_MEMBERS_FIELD, '任务执行人员'],
+      editable: ['任务名称', '关联项目', '任务执行人员', '开始时间', '结束时间', '优先级', '预计工时（小时）', '实际工时（小时）', '实际完成时间', '任务状态', '风险等级', '风险或阻碍'],
       hidden: [PERMISSION_HELPER_FIELD],
+      allowAdd: true,
     })],
   ]);
   return {
