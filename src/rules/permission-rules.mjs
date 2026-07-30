@@ -1,6 +1,6 @@
 const ROLE_CHAIN = {
   管理员: ['admin'],
-  项目负责人: ['manager'],
+  项目负责人: ['manager', 'employee'],
   普通员工: ['employee'],
 };
 

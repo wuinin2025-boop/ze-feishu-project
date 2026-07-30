@@ -130,9 +130,7 @@ try {
   });
   assert.equal(activeUnsynced.length, 0);
   assert.equal(departedWithRoles.length, 0);
-  const managerEmployeeOverlap = [...managerMembers].filter((id) => employeeMembers.has(id));
   const adminLowerRoleOverlap = [...adminMembers].filter((id) => managerMembers.has(id) || employeeMembers.has(id));
-  assert.equal(managerEmployeeOverlap.length, 0);
   assert.equal(adminLowerRoleOverlap.length, 0);
 
   console.log(JSON.stringify({
@@ -142,7 +140,6 @@ try {
     manager_cannot_edit_project_owner: true,
     employee_finance_perm: 0,
     employee_project_progress_read_only: true,
-    manager_employee_overlap: managerEmployeeOverlap.length,
     admin_lower_role_overlap: adminLowerRoleOverlap.length,
     active_unsynced_people: activeUnsynced.length,
     active_sync_failed_people: activeSyncFailed.length,
