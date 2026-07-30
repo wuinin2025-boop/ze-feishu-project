@@ -37,6 +37,27 @@ export function buildProgressKey({ projectNo, executionPeriod, invoiceNo }) {
   return [projectNo || '未匹配项目', executionPeriod || '未定期次', invoiceNo || '计划'].join('|');
 }
 
+export function buildInvoiceCollectionTitle(invoice) {
+  const sourceName = String(invoice?.sourceName || '').trim();
+  const projectNo = String(invoice?.projectNo || '').trim();
+  const invoiceNo = String(invoice?.invoiceNo || '').trim();
+  const sourceId = String(invoice?.sourceId || '').trim();
+  const identifier = invoiceNo || sourceId || '未命名发票';
+  return [sourceName, projectNo, identifier].filter(Boolean).join('|');
+}
+
+export function buildSyncLogTitle({ runTime, runType, result }) {
+  const date = new Date(runTime || 0);
+  const timeText = Number.isFinite(date.getTime())
+    ? date.toISOString().replace('T', ' ').slice(0, 19)
+    : '未知时间';
+  return [
+    timeText,
+    String(runType || '同步任务').trim(),
+    String(result || '待确认').trim(),
+  ].filter(Boolean).join('|');
+}
+
 export function buildSingleLinkField(recordId) {
   return recordId ? [recordId] : undefined;
 }
