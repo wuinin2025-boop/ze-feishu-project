@@ -110,6 +110,25 @@ async function ensureFields(client, table, fieldSpecs, report) {
     const existing = fields.find((field) => field.field_name === spec.name);
     if (existing) {
       report.fields.existing.push({ table: table.name, field: spec.name });
+      const property = spec.type === 11 ? fieldProperty(spec) : undefined;
+      const needsPropertyUpdate = property && JSON.stringify(existing.property || {}) !== JSON.stringify(property);
+      if (needsPropertyUpdate) {
+        report.fields.to_update ||= [];
+        report.fields.updated ||= [];
+        report.fields.to_update.push({ table: table.name, field: spec.name, property });
+        if (!DRY_RUN) {
+          await callJson(client, 'bitable_v1_appTableField_update', {
+            path: { app_token: APP_TOKEN, table_id: table.table_id, field_id: existing.field_id },
+            data: {
+              field_name: existing.field_name,
+              type: existing.type,
+              ui_type: existing.ui_type,
+              property,
+            },
+          });
+          report.fields.updated.push({ table: table.name, field: spec.name, property });
+        }
+      }
       continue;
     }
     report.fields.to_create.push({ table: table.name, field: spec.name, type: spec.type });
@@ -179,6 +198,7 @@ const client = await connectFeishu([
   'bitable.v1.appTable.create',
   'bitable.v1.appTableField.list',
   'bitable.v1.appTableField.create',
+  'bitable.v1.appTableField.update',
   'bitable.v1.appTableView.list',
   'bitable.v1.appTableView.create',
   'bitable.v1.appTableView.patch',

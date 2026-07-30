@@ -33,7 +33,7 @@ export const INVOICE_PROGRESS_FIELDS = [
   { name: '项目名称', type: 1, uiType: 'Text' },
   { name: '客户名称', type: 1, uiType: 'Text' },
   { name: '立项时项目负责人', type: 11, uiType: 'User' },
-  { name: '当前权限负责人', type: 11, uiType: 'User' },
+  { name: '当前权限负责人', type: 11, uiType: 'User', multiple: true },
   { name: '权限_可管理人员', type: 11, uiType: 'User', multiple: true },
   { name: '立项开票总次数', type: 2, uiType: 'Number' },
   { name: '当前开票总次数', type: 2, uiType: 'Number' },
