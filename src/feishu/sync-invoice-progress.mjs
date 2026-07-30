@@ -7,9 +7,11 @@ import {
 } from '../config.mjs';
 import {
   buildOldProjectNodes,
+  buildInvoiceCollectionTitle,
   buildProgressKey,
   buildSingleLinkField,
   buildSplitInvoiceNodes,
+  buildSyncLogTitle,
   classifyApplication,
   collapseReversedInvoices,
   deriveInvoiceStatus,
@@ -247,6 +249,7 @@ function attachProjectOverview(projects, overviewRows) {
 
 function buildInvoiceCollectionRows(invoices) {
   return invoices.map((invoice) => ({
+    '记录标题': buildInvoiceCollectionTitle(invoice),
     '源记录键': invoice.key,
     '来源表': invoice.sourceName,
     '源记录ID': invoice.sourceId,
@@ -460,10 +463,13 @@ try {
   };
 
   if (!DRY_RUN) {
+    const runType = '项目开票进度同步';
+    const result = '成功';
     await batchCreate(client, TARGET_TABLE_NAMES.syncLog, tableIds.get(TARGET_TABLE_NAMES.syncLog), [{
+      '记录标题': buildSyncLogTitle({ runTime: NOW, runType, result }),
       '运行时间': NOW,
-      '运行类型': '项目开票进度同步',
-      '结果': '成功',
+      '运行类型': runType,
+      '结果': result,
       '摘要': `进度表 ${progressResult.created} 新增 / ${progressResult.updated} 更新`,
       '详情JSON': JSON.stringify(report),
     }]);
