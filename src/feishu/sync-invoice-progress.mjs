@@ -64,6 +64,7 @@ const PROJECT_OVERVIEW_FIELDS = [
   '项目编号',
   '项目名称',
   '当前项目负责人',
+  '交接协同人',
 ];
 
 function assertTargetTableName(tableName) {
@@ -75,6 +76,14 @@ function assertTargetTableName(tableName) {
 function peopleField(value) {
   const raw = Array.isArray(value) ? value : [];
   return raw.flatMap((person) => person?.id ? [{ id: person.id }] : []);
+}
+
+function uniquePeople(...groups) {
+  const byId = new Map();
+  for (const person of groups.flat()) {
+    if (person?.id && !byId.has(person.id)) byId.set(person.id, { id: person.id });
+  }
+  return [...byId.values()];
 }
 
 function addToMap(map, key, value) {
@@ -233,6 +242,7 @@ function normalizeProjectOverview(record) {
     projectNo: textValue(fields['项目编号']),
     projectName: textValue(fields['项目名称']),
     currentManagers: peopleField(fields['当前项目负责人']),
+    handoffManagers: peopleField(fields['交接协同人']),
   };
 }
 
@@ -247,6 +257,7 @@ function attachProjectOverview(projects, overviewRows) {
     ...project,
     projectOverviewRecordId: overviewByProjectNo.get(project.projectNo)?.recordId,
     currentManagers: overviewByProjectNo.get(project.projectNo)?.currentManagers,
+    handoffManagers: overviewByProjectNo.get(project.projectNo)?.handoffManagers,
   }));
 }
 
@@ -289,6 +300,8 @@ function oldPlanRow(project, node) {
 
 function progressRow(project, node, dataSource) {
   const recordTitle = buildProgressKey({ projectNo: project.projectNo, executionPeriod: node.executionPeriod, invoiceNo: node.invoiceNo });
+  const currentManagers = project.currentManagers?.length ? project.currentManagers : project.owner;
+  const permissionManagers = uniquePeople(currentManagers, project.handoffManagers || []);
   const invoiceStatus = deriveInvoiceStatus({
     planDate: node.planDate || node.originalPlanDate,
     planAmount: node.currentPlanAmount,
@@ -314,7 +327,8 @@ function progressRow(project, node, dataSource) {
     '项目名称': project.projectName,
     '客户名称': project.customerName,
     '立项时项目负责人': project.owner,
-    '当前权限负责人': project.currentManagers?.length ? project.currentManagers : project.owner,
+    '当前权限负责人': currentManagers,
+    '权限_可管理人员': permissionManagers,
     '立项开票总次数': node.originalPlanCount || project.originalPlanCount || node.currentPlanCount,
     '当前开票总次数': node.currentPlanCount,
     '原计划期次': node.originalPeriod,

@@ -38,11 +38,12 @@ function assertTargetTableName(name) {
 }
 
 function fieldProperty(spec) {
+  if (spec.property) return spec.property;
   if (spec.type === 3) {
     const names = spec.options || SELECT_OPTIONS[spec.optionsKey] || [];
     return { options: names.map((name, index) => ({ name, color: (index % 20) + 1 })) };
   }
-  if (spec.type === 11) return { multiple: false };
+  if (spec.type === 11) return { multiple: Boolean(spec.multiple) };
   return undefined;
 }
 

@@ -274,7 +274,7 @@ function rolePayloads(tables, fieldsByTable) {
       allowAdd: true,
     })],
     [TABLES.invoiceProgress, readableRole(TABLES.invoiceProgress, fieldsByTable.get(TABLES.invoiceProgress), {
-      personRuleFields: ['当前权限负责人'],
+      personRuleFields: [PERMISSION_HELPER_FIELD],
       hidden: ['记录标题', '数据来源', '最后同步时间'],
     })],
     [TABLES.oldPlan, editableRole(TABLES.oldPlan, fieldsByTable.get(TABLES.oldPlan), {
@@ -366,6 +366,7 @@ try {
   for (const table of tables) fieldsByTable.set(table.table_id, await listFields(client, table.table_id));
   fieldsByTable.set(TABLES.tasks, await ensureUserField(client, TABLES.tasks, PERMISSION_HELPER_FIELD));
   fieldsByTable.set(TABLES.tasks, await ensureUserField(client, TABLES.tasks, PROJECT_MEMBERS_FIELD));
+  fieldsByTable.set(TABLES.invoiceProgress, await ensureUserField(client, TABLES.invoiceProgress, PERMISSION_HELPER_FIELD));
   fieldsByTable.set(TABLES.oldPlan, await ensureUserField(client, TABLES.oldPlan, PERMISSION_HELPER_FIELD));
   fieldsByTable.set(TABLES.supplierPayments, await ensureUserField(client, TABLES.supplierPayments, PERMISSION_HELPER_FIELD));
 

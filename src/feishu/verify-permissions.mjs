@@ -90,7 +90,8 @@ try {
   assert.deepEqual(rulePersonFields(managerOverview.rec_rule).sort(), ['交接协同人', '当前项目负责人'].sort());
   const managerInvoiceProgress = managerTables.get(TABLES.invoiceProgress);
   assert.equal(managerInvoiceProgress.table_perm, 1);
-  assert.deepEqual(rulePersonFields(managerInvoiceProgress.rec_rule), ['当前权限负责人']);
+  assert.deepEqual(rulePersonFields(managerInvoiceProgress.rec_rule), ['权限_可管理人员']);
+  assert.equal(managerInvoiceProgress.field_perm?.['权限_可管理人员'], 1);
   const managerOldPlan = managerTables.get(TABLES.oldPlan);
   assert.equal(managerOldPlan.field_perm?.['权限_可管理人员'], 1);
   assert.equal(managerTables.get(TABLES.invoiceCollection)?.table_perm ?? 0, 0);
