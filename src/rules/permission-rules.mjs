@@ -26,6 +26,7 @@ export function buildPersonRecordRule(fields, { otherPermission = 0 } = {}) {
     conditions: fields.map((field) => ({
       field_name: field.field_name,
       operator: 'contains',
+      value: [],
     })),
     conjunction: 'or',
     other_perm: otherPermission,

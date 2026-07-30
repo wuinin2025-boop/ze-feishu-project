@@ -52,8 +52,8 @@ test('field and record permission helpers preserve manager owner restrictions', 
     { field_name: '交接协同人', type: 11 },
   ]), {
     conditions: [
-      { field_name: '当前项目负责人', operator: 'contains' },
-      { field_name: '交接协同人', operator: 'contains' },
+      { field_name: '当前项目负责人', operator: 'contains', value: [] },
+      { field_name: '交接协同人', operator: 'contains', value: [] },
     ],
     conjunction: 'or',
     other_perm: 0,
