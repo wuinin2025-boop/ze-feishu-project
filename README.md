@@ -19,6 +19,12 @@ npm run sync:invoice
 npm run verify:invoice
 ```
 
+To refresh the simplified daily views used by non-technical users:
+
+```bash
+npm run sync:views
+```
+
 Prerequisites:
 
 - Node.js 20+.
@@ -38,6 +44,12 @@ Prerequisites:
 - `开票明细归集表`
 - `（旧项目）开票计划补录表`
 - `同步日志`
+
+Daily operating views:
+
+- `项目进度表` -> `日常任务`
+- `（旧项目）开票计划补录表` -> `日常补录`
+- `项目开票进度表` -> `日常开票进度`
 
 Latest validation report:
 
