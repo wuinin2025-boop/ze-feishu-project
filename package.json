@@ -8,5 +8,8 @@
     "schema:invoice": "node src/feishu/schema.mjs",
     "sync:invoice": "node src/feishu/sync-invoice-progress.mjs",
     "verify:invoice": "node src/feishu/verify-invoice-progress.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.0"
   }
 }
