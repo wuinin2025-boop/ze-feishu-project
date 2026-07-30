@@ -12,6 +12,7 @@ export const SOURCE_TABLES = {
 };
 
 export const TARGET_TABLE_NAMES = {
+  projectOverview: '项目总览表',
   invoiceProgressTrial: '项目开票进度表_试运行',
   invoiceCollection: '开票明细归集表',
   oldProjectPlan: '（旧项目）开票计划补录表',
