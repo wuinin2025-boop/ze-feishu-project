@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildOldProjectNodes,
   buildProgressKey,
+  buildSingleLinkField,
   buildSplitInvoiceNodes,
   classifyApplication,
   collapseReversedInvoices,
@@ -61,6 +62,12 @@ test('actual split invoices create actual invoice count rows', () => {
 test('progress key is stable for actual and plan-only rows', () => {
   assert.equal(buildProgressKey({ projectNo: 'P1', executionPeriod: 2, invoiceNo: 'F2' }), 'P1|2|F2');
   assert.equal(buildProgressKey({ projectNo: 'P1', executionPeriod: 2 }), 'P1|2|计划');
+});
+
+test('single link field uses Feishu write format', () => {
+  assert.deepEqual(buildSingleLinkField('rec123'), ['rec123']);
+  assert.equal(buildSingleLinkField(''), undefined);
+  assert.equal(buildSingleLinkField(undefined), undefined);
 });
 
 test('overall status prioritizes amount, payment and invoice alerts', () => {
