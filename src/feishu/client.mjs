@@ -1,9 +1,11 @@
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import process from 'node:process';
-import { Client } from '/Users/inin/.codex/cache/npm/_npx/74dfe5d932228314/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js';
-import { StdioClientTransport } from '/Users/inin/.codex/cache/npm/_npx/74dfe5d932228314/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
-const CONFIG_PATH = '/Users/inin/.codex/config.toml';
+const CONFIG_PATH = process.env.CODEX_CONFIG_PATH || path.join(os.homedir(), '.codex', 'config.toml');
 
 function readSection(text, sectionName) {
   const header = `[${sectionName}]`;
