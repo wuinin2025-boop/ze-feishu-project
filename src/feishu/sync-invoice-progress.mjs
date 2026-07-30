@@ -8,6 +8,7 @@ import {
 import {
   buildOldProjectNodes,
   buildProgressKey,
+  buildSingleLinkField,
   buildSplitInvoiceNodes,
   classifyApplication,
   collapseReversedInvoices,
@@ -55,6 +56,11 @@ const INVOICE_FIELDS = [
   '收款日期',
   '备注',
   'SourceID',
+];
+
+const PROJECT_OVERVIEW_FIELDS = [
+  '项目编号',
+  '项目名称',
 ];
 
 function assertTargetTableName(tableName) {
@@ -217,6 +223,28 @@ function normalizeProject(record) {
   };
 }
 
+function normalizeProjectOverview(record) {
+  const fields = record.fields || {};
+  return {
+    recordId: record.record_id,
+    projectNo: textValue(fields['项目编号']),
+    projectName: textValue(fields['项目名称']),
+  };
+}
+
+function attachProjectOverview(projects, overviewRows) {
+  const overviewByProjectNo = new Map();
+  for (const row of overviewRows) {
+    if (row.projectNo && !overviewByProjectNo.has(row.projectNo)) {
+      overviewByProjectNo.set(row.projectNo, row.recordId);
+    }
+  }
+  return projects.map((project) => ({
+    ...project,
+    projectOverviewRecordId: overviewByProjectNo.get(project.projectNo),
+  }));
+}
+
 function buildInvoiceCollectionRows(invoices) {
   return invoices.map((invoice) => ({
     '源记录键': invoice.key,
@@ -239,6 +267,7 @@ function buildInvoiceCollectionRows(invoices) {
 function oldPlanRow(project, node) {
   return {
     '源记录键': `old-plan|${project.projectNo}|${node.executionPeriod}`,
+    '关联项目': buildSingleLinkField(project.projectOverviewRecordId),
     '项目编号': project.projectNo,
     '项目名称': project.projectName,
     '开票总次数': node.currentPlanCount,
@@ -388,12 +417,13 @@ const client = await connectFeishu([
 
 try {
   const tableIds = await tableIdByName(client);
-  const [sourceProjects, ...invoiceSources] = await Promise.all([
+  const [sourceProjects, projectOverviewRecords, ...invoiceSources] = await Promise.all([
     searchAll(client, APP_TOKEN, SOURCE_TABLES.establishment, ESTABLISHMENT_FIELDS),
+    searchAll(client, APP_TOKEN, tableIds.get(TARGET_TABLE_NAMES.projectOverview), PROJECT_OVERVIEW_FIELDS),
     ...SOURCE_TABLES.invoices.map((source) => searchAll(client, APP_TOKEN, source.id, INVOICE_FIELDS)
       .then((records) => records.map((record) => normalizeInvoice(source, record)))),
   ]);
-  const projects = sourceProjects.map(normalizeProject);
+  const projects = attachProjectOverview(sourceProjects.map(normalizeProject), projectOverviewRecords.map(normalizeProjectOverview));
   const invoices = invoiceSources.flat();
   const rows = buildRows(projects, invoices);
 
