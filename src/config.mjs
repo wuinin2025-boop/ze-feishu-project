@@ -13,7 +13,7 @@ export const SOURCE_TABLES = {
 
 export const TARGET_TABLE_NAMES = {
   projectOverview: '项目总览表',
-  invoiceProgressTrial: '项目开票进度表_试运行',
+  invoiceProgressTrial: '项目开票进度表',
   invoiceCollection: '开票明细归集表',
   oldProjectPlan: '（旧项目）开票计划补录表',
   syncLog: '同步日志',
@@ -63,6 +63,7 @@ export const INVOICE_PROGRESS_FIELDS = [
 ];
 
 export const INVOICE_COLLECTION_FIELDS = [
+  { name: '记录标题', type: 1, uiType: 'Text' },
   { name: '源记录键', type: 1, uiType: 'Text' },
   { name: '来源表', type: 1, uiType: 'Text' },
   { name: '源记录ID', type: 1, uiType: 'Text' },
@@ -94,6 +95,7 @@ export const OLD_PROJECT_PLAN_FIELDS = [
 ];
 
 export const SYNC_LOG_FIELDS = [
+  { name: '记录标题', type: 1, uiType: 'Text' },
   { name: '运行时间', type: 5, uiType: 'DateTime' },
   { name: '运行类型', type: 1, uiType: 'Text' },
   { name: '结果', type: 3, uiType: 'SingleSelect', options: ['成功', '失败', '待确认'] },
