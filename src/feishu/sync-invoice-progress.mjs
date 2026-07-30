@@ -63,6 +63,7 @@ const INVOICE_FIELDS = [
 const PROJECT_OVERVIEW_FIELDS = [
   '项目编号',
   '项目名称',
+  '当前项目负责人',
 ];
 
 function assertTargetTableName(tableName) {
@@ -231,6 +232,7 @@ function normalizeProjectOverview(record) {
     recordId: record.record_id,
     projectNo: textValue(fields['项目编号']),
     projectName: textValue(fields['项目名称']),
+    currentManagers: peopleField(fields['当前项目负责人']),
   };
 }
 
@@ -238,12 +240,13 @@ function attachProjectOverview(projects, overviewRows) {
   const overviewByProjectNo = new Map();
   for (const row of overviewRows) {
     if (row.projectNo && !overviewByProjectNo.has(row.projectNo)) {
-      overviewByProjectNo.set(row.projectNo, row.recordId);
+      overviewByProjectNo.set(row.projectNo, row);
     }
   }
   return projects.map((project) => ({
     ...project,
-    projectOverviewRecordId: overviewByProjectNo.get(project.projectNo),
+    projectOverviewRecordId: overviewByProjectNo.get(project.projectNo)?.recordId,
+    currentManagers: overviewByProjectNo.get(project.projectNo)?.currentManagers,
   }));
 }
 
@@ -311,7 +314,7 @@ function progressRow(project, node, dataSource) {
     '项目名称': project.projectName,
     '客户名称': project.customerName,
     '立项时项目负责人': project.owner,
-    '当前权限负责人': project.owner,
+    '当前权限负责人': project.currentManagers?.length ? project.currentManagers : project.owner,
     '立项开票总次数': node.originalPlanCount || project.originalPlanCount || node.currentPlanCount,
     '当前开票总次数': node.currentPlanCount,
     '原计划期次': node.originalPeriod,
