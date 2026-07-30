@@ -37,6 +37,10 @@ export function buildProgressKey({ projectNo, executionPeriod, invoiceNo }) {
   return [projectNo || '未匹配项目', executionPeriod || '未定期次', invoiceNo || '计划'].join('|');
 }
 
+export function buildSingleLinkField(recordId) {
+  return recordId ? [recordId] : undefined;
+}
+
 export function deriveOverallStatus({ invoiceStatus, paymentStatus, diffStatus }) {
   if (diffStatus === '金额异常待核对') return '金额异常待核对';
   if (paymentStatus === '回款逾期') return '回款逾期';
