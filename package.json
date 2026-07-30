@@ -12,6 +12,7 @@
     "sync:project-status": "node src/feishu/sync-project-status.mjs",
     "sync:views": "node src/feishu/sync-views.mjs",
     "sync:all": "node src/feishu/sync-all.mjs",
+    "control": "node src/control/server.mjs",
     "verify:permissions": "node src/feishu/verify-permissions.mjs",
     "verify:invoice": "node src/feishu/verify-invoice-progress.mjs"
   },

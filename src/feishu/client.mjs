@@ -26,7 +26,7 @@ function parseStringAssignments(section) {
   return values;
 }
 
-export async function connectFeishu(toolNames) {
+function configuredFeishu() {
   const text = fs.readFileSync(CONFIG_PATH, 'utf8');
   const sectionName = text.includes('[mcp_servers.feishu-project-center]')
     ? 'mcp_servers.feishu-project-center'
@@ -35,6 +35,11 @@ export async function connectFeishu(toolNames) {
   const env = text.includes(`[${sectionName}.env]`)
     ? parseStringAssignments(readSection(text, `${sectionName}.env`))
     : {};
+  return { base, env };
+}
+
+export async function connectFeishu(toolNames) {
+  const { base, env } = configuredFeishu();
   const command = base.command || 'npx';
   const args = command.endsWith('feishu-base.sh')
     ? []
@@ -48,6 +53,42 @@ export async function connectFeishu(toolNames) {
   const client = new Client({ name: 'ze-feishu-project', version: '0.1.0' });
   await client.connect(transport);
   return client;
+}
+
+export async function callFeishuOpenApi(apiPath, { method = 'GET', data } = {}) {
+  const { env } = configuredFeishu();
+  const domain = (env.LARK_DOMAIN || 'https://open.feishu.cn').replace(/\/$/, '');
+  const tokenResponse = await fetch(`${domain}/open-apis/auth/v3/tenant_access_token/internal`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ app_id: env.APP_ID, app_secret: env.APP_SECRET }),
+  });
+  const tokenData = await tokenResponse.json();
+  if (!tokenResponse.ok || tokenData.code !== 0 || !tokenData.tenant_access_token) {
+    throw new Error(`Feishu token request failed: ${JSON.stringify(tokenData)}`);
+  }
+
+  const response = await fetch(`${domain}/open-apis${apiPath}`, {
+    method,
+    headers: {
+      authorization: `Bearer ${tokenData.tenant_access_token}`,
+      'content-type': 'application/json; charset=utf-8',
+    },
+    ...(data === undefined ? {} : { body: JSON.stringify(data) }),
+  });
+  const responseText = await response.text();
+  let result = {};
+  if (responseText) {
+    try {
+      result = JSON.parse(responseText);
+    } catch {
+      throw new Error(`Feishu API ${method} ${apiPath} returned HTTP ${response.status}: ${responseText.slice(0, 300)}`);
+    }
+  }
+  if (!response.ok || (typeof result.code === 'number' && result.code !== 0)) {
+    throw new Error(`Feishu API ${method} ${apiPath} failed: ${JSON.stringify(result)}`);
+  }
+  return result;
 }
 
 export async function callJson(client, name, args) {

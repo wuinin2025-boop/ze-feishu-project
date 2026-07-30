@@ -6,6 +6,7 @@ import { callJson, connectFeishu, searchAll, textValue } from './client.mjs';
 
 const TABLES = {
   overview: 'tblTuTJJDEQK6XcZ',
+  leads: 'tblpvwmE3OHO0nmC',
   tasks: 'tblMqbOebPtzjEdH',
   invoiceProgress: 'tblA4obaIS0jeylo',
   invoiceCollection: 'tblVnpNCeYhtKCD0',
@@ -14,7 +15,20 @@ const TABLES = {
 };
 const SOURCE_PREFIX = '源_';
 const ADMIN_DASHBOARD_BLOCK = 'blkYK9yjNcf3AU1r';
-const DATA_SYNC_DOCUMENT_BLOCK = 'ldxYc8pI4kqnBqk2';
+const TASK_EDITABLE_FIELDS = [
+  '任务名称',
+  '关联项目',
+  '任务执行人员',
+  '开始时间',
+  '结束时间',
+  '优先级',
+  '预计工时（小时）',
+  '实际工时（小时）',
+  '实际完成时间',
+  '任务状态',
+  '风险等级',
+  '风险或阻碍',
+];
 
 function byTable(role) {
   return new Map((role.table_roles || []).map((table) => [table.table_id, table]));
@@ -25,7 +39,22 @@ function dashboardPermission(role, blockId) {
 }
 
 function rulePersonFields(rule) {
-  return (rule?.conditions || []).map((condition) => condition.field_name);
+  const conditions = rule?.condition_groups?.flatMap((group) => group.conditions || [])
+    || rule?.conditions
+    || [];
+  return conditions.map((condition) => condition.field_name || '创建人');
+}
+
+function allFieldsUseDefaultPermission(tableRole) {
+  return Object.keys(tableRole.field_perm || {}).length === 0;
+}
+
+function assertTaskFieldPermissions(tableRole) {
+  for (const fieldName of TASK_EDITABLE_FIELDS) {
+    assert.equal(tableRole.field_perm?.[fieldName], 3, `项目进度表字段应可编辑: ${fieldName}`);
+  }
+  assert.equal(tableRole.field_perm?.['权限_可管理人员'], 1);
+  assert.equal(tableRole.field_perm?.['项目成员'], 2);
 }
 
 async function memberIds(client, roleId) {
@@ -89,16 +118,32 @@ try {
   assert.equal(managerOverview.field_perm?.['当前项目负责人'], 1);
   assert.equal(managerOverview.field_perm?.['项目参与人员'], 3);
   assert.deepEqual(rulePersonFields(managerOverview.rec_rule).sort(), ['交接协同人', '当前项目负责人'].sort());
+  const managerLeads = managerTables.get(TABLES.leads);
+  assert.equal(managerLeads.table_perm, 2);
+  assert.equal(managerLeads.allow_delete_record, true);
+  assert.deepEqual(rulePersonFields(managerLeads.rec_rule).sort(), ['创建人', '参与人员', '线索负责人'].sort());
+  assert.ok(allFieldsUseDefaultPermission(managerLeads));
   const managerInvoiceProgress = managerTables.get(TABLES.invoiceProgress);
   assert.equal(managerInvoiceProgress.table_perm, 2);
-  assert.equal(managerInvoiceProgress.allow_add_record, true);
-  assert.deepEqual(rulePersonFields(managerInvoiceProgress.rec_rule).sort(), ['当前权限负责人', '权限_可管理人员'].sort());
+  assert.equal(managerInvoiceProgress.allow_delete_record, true);
+  assert.deepEqual(rulePersonFields(managerInvoiceProgress.rec_rule).sort(), ['创建人', '当前权限负责人', '权限_可管理人员'].sort());
+  assert.ok(allFieldsUseDefaultPermission(managerInvoiceProgress));
+  const managerTasks = managerTables.get(TABLES.tasks);
+  assert.equal(managerTasks.table_perm, 2);
+  assert.equal(managerTasks.allow_delete_record, true);
+  assert.deepEqual(rulePersonFields(managerTasks.rec_rule).sort(), ['创建人', '任务执行人员', '权限_可管理人员', '项目成员'].sort());
+  assertTaskFieldPermissions(managerTasks);
   const managerOldPlan = managerTables.get(TABLES.oldPlan);
-  assert.equal(managerOldPlan.field_perm?.['权限_可管理人员'], 1);
+  assert.equal(managerOldPlan.table_perm, 2);
+  assert.equal(managerOldPlan.allow_delete_record, true);
+  assert.deepEqual(rulePersonFields(managerOldPlan.rec_rule).sort(), ['创建人', '权限_可管理人员'].sort());
+  assert.ok(allFieldsUseDefaultPermission(managerOldPlan));
   const employeeTasks = employeeTables.get(TABLES.tasks);
   assert.equal(employeeTasks.table_perm, 2);
-  assert.equal(employeeTasks.field_perm?.['任务名称'], 3);
-  assert.deepEqual(rulePersonFields(employeeTasks.rec_rule).sort(), ['任务执行人员', '项目成员'].sort());
+  assert.equal(employeeTasks.view_perm, 2);
+  assert.equal(employeeTasks.allow_delete_record, true);
+  assert.deepEqual(rulePersonFields(employeeTasks.rec_rule).sort(), ['创建人', '任务执行人员', '项目成员'].sort());
+  assertTaskFieldPermissions(employeeTasks);
   assert.equal(managerTables.get(TABLES.invoiceCollection)?.table_perm ?? 0, 0);
   assert.equal(employeeTables.get(TABLES.invoiceProgress)?.table_perm ?? 0, 0);
   assert.equal(employeeTables.get(TABLES.oldPlan)?.table_perm ?? 0, 0);
@@ -107,8 +152,9 @@ try {
   assert.equal(dashboardPermission(admin, ADMIN_DASHBOARD_BLOCK), 1);
   assert.equal(dashboardPermission(manager, ADMIN_DASHBOARD_BLOCK), 0);
   assert.equal(dashboardPermission(employee, ADMIN_DASHBOARD_BLOCK), 0);
-  assert.equal(dashboardPermission(manager, DATA_SYNC_DOCUMENT_BLOCK), 0);
-  assert.equal(dashboardPermission(employee, DATA_SYNC_DOCUMENT_BLOCK), 0);
+  assert.ok(admin.block_roles.every((block) => block.block_id.startsWith('blk')), '管理员仪表盘权限不能包含文档块');
+  assert.ok(manager.block_roles.every((block) => block.block_id.startsWith('blk')), '项目负责人仪表盘权限不能包含文档块');
+  assert.ok(employee.block_roles.every((block) => block.block_id.startsWith('blk')), '普通员工仪表盘权限不能包含文档块');
 
   const [people, adminMembers, managerMembers, employeeMembers] = await Promise.all([
     searchAll(client, APP_TOKEN, TABLES.people, ['员工姓名', '飞书用户', '系统身份', '是否在职', '权限角色状态']),
@@ -131,6 +177,7 @@ try {
     ));
   });
   assert.equal(activeUnsynced.length, 0);
+  assert.equal(activeSyncFailed.length, 0, `在职人员权限同步失败: ${activeSyncFailed.map((row) => textValue(row.fields?.['员工姓名'])).join('、')}`);
   assert.equal(departedWithRoles.length, 0);
   const adminLowerRoleOverlap = [...adminMembers].filter((id) => managerMembers.has(id) || employeeMembers.has(id));
   assert.equal(adminLowerRoleOverlap.length, 0);

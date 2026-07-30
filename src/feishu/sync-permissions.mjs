@@ -2,6 +2,7 @@
 
 import { APP_TOKEN, TARGET_TABLE_NAMES } from '../config.mjs';
 import {
+  buildEditableTableRole,
   buildFieldPermissions,
   buildPersonRecordRule,
   departedManagerHandoff,
@@ -9,8 +10,12 @@ import {
   desiredRoleMemberships,
   latestApplicableManagerChangeByProject,
   projectManagerPeople,
+  recordRuleFields,
+  resolveManagerChangeRecordFields,
+  roleNeedsRebuild,
 } from '../rules/permission-rules.mjs';
 import {
+  callFeishuOpenApi,
   callJson,
   connectFeishu,
   searchAll,
@@ -35,7 +40,51 @@ const SOURCE_PREFIX = '源_';
 const PERMISSION_HELPER_FIELD = '权限_可管理人员';
 const PROJECT_MEMBERS_FIELD = '项目成员';
 const ADMIN_DASHBOARD_BLOCK = 'blkYK9yjNcf3AU1r';
-const DATA_SYNC_DOCUMENT_BLOCK = 'ldxYc8pI4kqnBqk2';
+const COLLABORATOR_ACCOUNT_ACTION = '请在飞书高级权限的角色成员选择器中搜索该用户。若搜索不到，请先恢复或邀请该用户的当前组织账号，再重新选择“系统_人员权限表.飞书用户”和项目成员中的当前账号。';
+const TASK_EDITABLE_FIELDS = [
+  '任务名称',
+  '关联项目',
+  '任务执行人员',
+  '开始时间',
+  '结束时间',
+  '优先级',
+  '预计工时（小时）',
+  '实际工时（小时）',
+  '实际完成时间',
+  '任务状态',
+  '风险等级',
+  '风险或阻碍',
+];
+const FIELD_SETTINGS = [
+  {
+    tableId: TABLES.overview,
+    fieldName: '当前项目负责人',
+    description: '由系统_负责人变更记录表同步更新。项目可设置多个负责人；需要变更时，请在系统_负责人变更记录表选择关联项目和新当前负责人。',
+    multiple: true,
+  },
+  {
+    tableId: TABLES.managerChanges,
+    fieldName: '原当前负责人',
+    description: '可选多人。记录变更前负责人，通常由管理员按实际情况填写。',
+    multiple: true,
+  },
+  {
+    tableId: TABLES.managerChanges,
+    fieldName: '新当前负责人',
+    description: '可选多人。项目要设置 2 个负责人时，在这里同时选择 2 个人。',
+    multiple: true,
+  },
+  {
+    tableId: TABLES.managerChanges,
+    fieldName: '项目编号',
+    description: '脚本字段。选择关联项目后同步时自动带出，日常录入不用手填。',
+  },
+  {
+    tableId: TABLES.managerChanges,
+    fieldName: '关联项目',
+    description: '负责人变更的录入入口。请选择要变更负责人的项目。',
+  },
+];
 
 function peopleValue(value) {
   const raw = value && typeof value === 'object' && !Array.isArray(value) && Array.isArray(value.value) ? value.value : value;
@@ -72,14 +121,6 @@ function existingNames(fields, names) {
   return names.filter((name) => known.has(name));
 }
 
-function personFields(fields, names) {
-  const byName = fieldMap(fields);
-  return names.flatMap((name) => {
-    const field = byName.get(name);
-    return field?.type === 11 ? [{ field_name: field.field_name, type: field.type }] : [];
-  });
-}
-
 function noPermission(table) {
   return { table_id: table.table_id, table_perm: 0 };
 }
@@ -91,7 +132,7 @@ function optionRules(fields, hidden = []) {
     .map((field) => [field.field_name, 0]));
 }
 
-function editableRole(tableId, fields, { personRuleFields, editable = [], hidden = [], allowAdd = false }) {
+function editableRole(tableId, fields, { personRuleFields, editable = [], hidden = [], allowAdd = false, otherPermission = 0 }) {
   return {
     table_id: tableId,
     table_perm: 2,
@@ -102,7 +143,7 @@ function editableRole(tableId, fields, { personRuleFields, editable = [], hidden
       hidden: existingNames(fields, hidden),
     }),
     field_action_rules: { select_option_edit: optionRules(fields, hidden) },
-    rec_rule: buildPersonRecordRule(personFields(fields, personRuleFields), { permission: 2 }),
+    rec_rule: buildPersonRecordRule(recordRuleFields(fields, personRuleFields), { otherPermission }),
   };
 }
 
@@ -112,19 +153,24 @@ function readableRole(tableId, fields, { personRuleFields, hidden = [], fieldPer
     table_perm: 1,
     allow_add_record: false,
     allow_delete_record: false,
-    rec_rule: buildPersonRecordRule(personFields(fields, personRuleFields), { permission: 1 }),
+    rec_rule: buildPersonRecordRule(recordRuleFields(fields, personRuleFields)),
   };
   if (fieldPermissions) role.field_perm = buildFieldPermissions(fields, { hidden: existingNames(fields, hidden) });
   return role;
 }
 
-function editableTableRole(tableId, fields, { personRuleFields, allowAdd = false }) {
+function editableAllRecordsRole(tableId, fields, { editable = [], hidden = [], allowAdd = false }) {
   return {
     table_id: tableId,
-    table_perm: 2,
+    table_perm: 4,
     allow_add_record: allowAdd,
     allow_delete_record: false,
-    rec_rule: buildPersonRecordRule(personFields(fields, personRuleFields), { permission: 2 }),
+    view_perm: 2,
+    field_perm: buildFieldPermissions(fields, {
+      editable: existingNames(fields, editable),
+      hidden: existingNames(fields, hidden),
+    }),
+    field_action_rules: { select_option_edit: optionRules(fields, hidden) },
   };
 }
 
@@ -161,6 +207,48 @@ async function ensureUserField(client, tableId, fieldName) {
   return listFields(client, tableId);
 }
 
+async function ensureCreatedUserField(client, tableId, fieldName) {
+  let fields = await listFields(client, tableId);
+  if (fields.some((field) => field.field_name === fieldName && field.type === 1003)) return fields;
+  if (DRY_RUN) return [...fields, { field_name: fieldName, type: 1003, ui_type: 'CreatedUser' }];
+  await callJson(client, 'bitable_v1_appTableField_create', {
+    path: { app_token: APP_TOKEN, table_id: tableId },
+    data: { field_name: fieldName, type: 1003 },
+  });
+  fields = await listFields(client, tableId);
+  return fields;
+}
+
+async function applyFieldSettings(client, fieldsByTable) {
+  const planned = [];
+  const updated = [];
+  const descriptions = [];
+  for (const spec of FIELD_SETTINGS) {
+    const field = fieldsByTable.get(spec.tableId)?.find((item) => item.field_name === spec.fieldName);
+    if (!field) continue;
+    const nextProperty = spec.multiple === undefined ? field.property : { ...(field.property || {}), multiple: spec.multiple };
+    const propertyChanged = JSON.stringify(field.property || null) !== JSON.stringify(nextProperty || null);
+    if (spec.description && (field.description || '') !== spec.description) {
+      descriptions.push({ table_id: spec.tableId, field: spec.fieldName, desired: spec.description, current: field.description || '' });
+    }
+    if (!propertyChanged) continue;
+    planned.push({ table_id: spec.tableId, field: spec.fieldName, multiple: spec.multiple });
+    if (DRY_RUN) continue;
+    await callJson(client, 'bitable_v1_appTableField_update', {
+      path: { app_token: APP_TOKEN, table_id: spec.tableId, field_id: field.field_id },
+      data: {
+        field_name: field.field_name,
+        type: field.type,
+        ui_type: field.ui_type,
+        ...(nextProperty ? { property: nextProperty } : {}),
+      },
+    });
+    field.property = nextProperty;
+    updated.push({ table_id: spec.tableId, field: spec.fieldName, multiple: spec.multiple });
+  }
+  return { planned, updated, descriptions };
+}
+
 async function batchUpdate(client, tableId, records) {
   if (DRY_RUN || !records.length) return 0;
   let count = 0;
@@ -194,6 +282,50 @@ async function listRoles(client) {
   const roles = new Map((data.items || []).map((role) => [role.role_name, role]));
   for (const name of ROLE_NAMES) if (!roles.has(name)) throw new Error(`Missing role: ${name}`);
   return roles;
+}
+
+async function listCollaborators(client) {
+  const data = await callJson(client, 'drive_v1_permissionMember_list', {
+    path: { token: APP_TOKEN },
+    params: { type: 'bitable', fields: '*' },
+  });
+  return data.items || [];
+}
+
+async function ensureCollaborators(client, people, existingUserIds) {
+  const missing = people.filter((person) => (
+    person.userId
+    && person.employmentStatus === '在职'
+    && ['管理员', '项目负责人', '普通员工'].includes(person.identity)
+    && !existingUserIds.has(person.userId)
+  ));
+  const errors = [];
+  if (!DRY_RUN) {
+    for (const person of missing) {
+      try {
+        await callJson(client, 'drive_v1_permissionMember_create', {
+          path: { token: APP_TOKEN },
+          params: { type: 'bitable', need_notification: false },
+          data: {
+            member_type: 'openid',
+            member_id: person.userId,
+            perm: 'edit',
+            perm_type: 'single_page',
+            type: 'user',
+          },
+        });
+        existingUserIds.add(person.userId);
+      } catch (error) {
+        errors.push({
+          userId: person.userId,
+          name: person.name,
+          message: error.message,
+          action_required: COLLABORATOR_ACCOUNT_ACTION,
+        });
+      }
+    }
+  }
+  return { planned: missing, errors };
 }
 
 async function listRoleMembers(client, roleId) {
@@ -284,25 +416,44 @@ function normalizeManagerChange(row) {
     recordId: row.record_id,
     changeNo: textValue(fields['变更记录编号']),
     projectNo: textValue(fields['项目编号']),
+    oldManagers: peopleValue(fields['原当前负责人']),
     newManagers: peopleValue(fields['新当前负责人']),
     effectiveAt: Number(fields['生效日期']) || 0,
     createdAt: Number(fields['创建时间']) || 0,
+    changeReason: textValue(fields['变更原因']),
     linkedProjectIds: linkIds(fields['关联项目']),
   };
 }
 
 function managerChangeUpdates(changeRows, projectRows) {
-  const projectByNo = new Map(projectRows
-    .map((project) => [textValue(project.fields?.['项目编号']), project])
+  const projectSummaries = projectRows.map((project) => ({
+    recordId: project.record_id,
+    projectNo: textValue(project.fields?.['项目编号']),
+    currentManagers: peopleValue(project.fields?.['当前项目负责人']),
+    row: project,
+  }));
+  const projectByRecordId = new Map(projectSummaries.map((project) => [project.recordId, project]));
+  const projectByNo = new Map(projectSummaries
+    .map((project) => [project.projectNo, project])
     .filter(([projectNo]) => projectNo));
-  const changes = changeRows.map(normalizeManagerChange);
-  const latestByProject = latestApplicableManagerChangeByProject(changes, { now: NOW });
   const projectUpdates = [];
   const changeRecordUpdates = [];
   const skipped = [];
+  const changes = changeRows.map((row) => {
+    const change = normalizeManagerChange(row);
+    const fields = resolveManagerChangeRecordFields(change, projectByRecordId, { projectByNo, now: NOW });
+    if (Object.keys(fields).length) {
+      changeRecordUpdates.push({ record_id: change.recordId, fields });
+      if (fields['项目编号']) change.projectNo = fields['项目编号'];
+      if (fields['变更记录编号']) change.changeNo = fields['变更记录编号'];
+      if (fields['关联项目']) change.linkedProjectIds = fields['关联项目'];
+    }
+    return change;
+  });
+  const latestByProject = latestApplicableManagerChangeByProject(changes, { now: NOW });
 
   for (const change of changes.filter((item) => item.projectNo)) {
-    const project = projectByNo.get(change.projectNo);
+    const project = projectByNo.get(change.projectNo)?.row;
     if (!project) {
       skipped.push({ record_id: change.recordId, 项目编号: change.projectNo, reason: '项目总览表未找到项目编号' });
       continue;
@@ -313,7 +464,7 @@ function managerChangeUpdates(changeRows, projectRows) {
   }
 
   for (const change of latestByProject.values()) {
-    const project = projectByNo.get(change.projectNo);
+    const project = projectByNo.get(change.projectNo)?.row;
     if (!project) continue;
 
     const fields = {};
@@ -337,25 +488,31 @@ function rolePayloads(tables, fieldsByTable) {
       editable: ['项目描述', '项目参与人员'],
       hidden: ['上次当前负责人', '人工确认有效源记录ID', '源记录ID'],
     })],
-    [TABLES.leads, editableRole(TABLES.leads, fieldsByTable.get(TABLES.leads), {
-      personRuleFields: ['线索负责人', '参与人员'],
-      editable: ['线索名称', '线索编号', '预计金额', '线索状态', '客户名称', '线索负责人', '参与人员', '最新沟通情况', '下一步计划', '下次跟进日期', '方案链接或附件', '风险或阻碍', '预计立项公司', '转项目状态', '关联正式项目'],
+    [TABLES.leads, buildEditableTableRole(TABLES.leads, fieldsByTable.get(TABLES.leads), {
+      personRuleFields: ['线索负责人', '参与人员', '创建人'],
       allowAdd: true,
+      allowDelete: true,
+      viewPerm: 2,
     })],
-    [TABLES.tasks, editableRole(TABLES.tasks, fieldsByTable.get(TABLES.tasks), {
-      personRuleFields: [PERMISSION_HELPER_FIELD],
-      editable: ['任务名称', '关联项目', '任务执行人员', '开始时间', '结束时间', '优先级', '预计工时（小时）', '实际工时（小时）', '实际完成时间', '任务状态', '风险等级', '风险或阻碍'],
+    [TABLES.tasks, buildEditableTableRole(TABLES.tasks, fieldsByTable.get(TABLES.tasks), {
+      personRuleFields: [PERMISSION_HELPER_FIELD, PROJECT_MEMBERS_FIELD, '任务执行人员', '任务创建人'],
+      addable: [PROJECT_MEMBERS_FIELD],
+      editable: TASK_EDITABLE_FIELDS,
       allowAdd: true,
+      allowDelete: true,
+      viewPerm: 2,
     })],
-    [TABLES.invoiceProgress, editableTableRole(TABLES.invoiceProgress, fieldsByTable.get(TABLES.invoiceProgress), {
-      personRuleFields: [PERMISSION_HELPER_FIELD, '当前权限负责人'],
+    [TABLES.invoiceProgress, buildEditableTableRole(TABLES.invoiceProgress, fieldsByTable.get(TABLES.invoiceProgress), {
+      personRuleFields: [PERMISSION_HELPER_FIELD, '当前权限负责人', '创建人'],
       allowAdd: true,
+      allowDelete: true,
+      viewPerm: 2,
     })],
-    [TABLES.oldPlan, editableRole(TABLES.oldPlan, fieldsByTable.get(TABLES.oldPlan), {
-      personRuleFields: [PERMISSION_HELPER_FIELD],
-      editable: ['关联项目', '预计开票总次数', '开票期次', '计划开票日期', '计划开票金额', '预计回款日期', '备注', '发票备注'],
-      hidden: ['同步到应收记录', '同步状态', '同步结果说明', '同步时间', '源记录键'],
+    [TABLES.oldPlan, buildEditableTableRole(TABLES.oldPlan, fieldsByTable.get(TABLES.oldPlan), {
+      personRuleFields: [PERMISSION_HELPER_FIELD, '补录人'],
       allowAdd: true,
+      allowDelete: true,
+      viewPerm: 2,
     })],
     [TABLES.supplierPayments, editableRole(TABLES.supplierPayments, fieldsByTable.get(TABLES.supplierPayments), {
       personRuleFields: [PERMISSION_HELPER_FIELD],
@@ -365,11 +522,13 @@ function rolePayloads(tables, fieldsByTable) {
   ]);
   const employeeRoles = new Map([
     [TABLES.leads, readableRole(TABLES.leads, fieldsByTable.get(TABLES.leads), { personRuleFields: ['参与人员'] })],
-    [TABLES.tasks, editableRole(TABLES.tasks, fieldsByTable.get(TABLES.tasks), {
-      personRuleFields: [PROJECT_MEMBERS_FIELD, '任务执行人员'],
-      editable: ['任务名称', '关联项目', '任务执行人员', '开始时间', '结束时间', '优先级', '预计工时（小时）', '实际工时（小时）', '实际完成时间', '任务状态', '风险等级', '风险或阻碍'],
-      hidden: [PERMISSION_HELPER_FIELD],
+    [TABLES.tasks, buildEditableTableRole(TABLES.tasks, fieldsByTable.get(TABLES.tasks), {
+      personRuleFields: [PROJECT_MEMBERS_FIELD, '任务执行人员', '任务创建人'],
+      addable: [PROJECT_MEMBERS_FIELD],
+      editable: TASK_EDITABLE_FIELDS,
       allowAdd: true,
+      allowDelete: true,
+      viewPerm: 2,
     })],
   ]);
   return {
@@ -394,7 +553,6 @@ function rolePayloads(tables, fieldsByTable) {
       )),
       block_roles: [
         { block_id: ADMIN_DASHBOARD_BLOCK, block_perm: 0 },
-        { block_id: DATA_SYNC_DOCUMENT_BLOCK, block_perm: 0 },
       ],
       base_rule: { base_complex_edit: 0, copy: 0 },
     },
@@ -403,7 +561,6 @@ function rolePayloads(tables, fieldsByTable) {
       table_roles: tables.map((table) => employeeRoles.get(table.table_id) || noPermission(table)),
       block_roles: [
         { block_id: ADMIN_DASHBOARD_BLOCK, block_perm: 0 },
-        { block_id: DATA_SYNC_DOCUMENT_BLOCK, block_perm: 0 },
       ],
       base_rule: { base_complex_edit: 0, copy: 0 },
     },
@@ -413,17 +570,52 @@ function rolePayloads(tables, fieldsByTable) {
 }
 
 async function updateRole(client, role, data) {
-  if (DRY_RUN) return;
+  if (DRY_RUN) return role;
+  if (roleNeedsRebuild(role)) {
+    const currentRoles = await callJson(client, 'base_v2_appRole_list', {
+      path: { app_token: APP_TOKEN },
+      params: { page_size: 100 },
+    });
+    const reusableReplacement = (currentRoles.items || []).find((candidate) => (
+      candidate.role_name.startsWith(`${data.role_name}-权限修复-`)
+      && !roleNeedsRebuild(candidate)
+    ));
+    let replacementRoleId = reusableReplacement?.role_id;
+    if (!replacementRoleId) {
+      const temporaryName = `${data.role_name}-权限修复-${Date.now()}`;
+      const created = await callFeishuOpenApi(`/base/v2/apps/${APP_TOKEN}/roles`, {
+        method: 'POST',
+        data: { ...data, role_name: temporaryName },
+      });
+      replacementRoleId = created.data?.role?.role_id || created.data?.role_id;
+    }
+    if (!replacementRoleId) throw new Error(`Replacement role for ${data.role_name} was created without role_id`);
+
+    await callFeishuOpenApi(`/bitable/v1/apps/${APP_TOKEN}/roles/${role.role_id}`, { method: 'DELETE' });
+    await callJson(client, 'base_v2_appRole_update', {
+      path: { app_token: APP_TOKEN, role_id: replacementRoleId },
+      data,
+    });
+    return {
+      ...role,
+      ...data,
+      role_id: replacementRoleId,
+      role_name: data.role_name,
+    };
+  }
+
   await callJson(client, 'base_v2_appRole_update', {
     path: { app_token: APP_TOKEN, role_id: role.role_id },
     data,
   });
+  return { ...role, ...data };
 }
 
 const client = await connectFeishu([
   'bitable.v1.appTable.list',
   'bitable.v1.appTableField.list',
   'bitable.v1.appTableField.create',
+  'bitable.v1.appTableField.update',
   'bitable.v1.appTableRecord.search',
   'bitable.v1.appTableRecord.batchCreate',
   'bitable.v1.appTableRecord.batchUpdate',
@@ -432,6 +624,8 @@ const client = await connectFeishu([
   'bitable.v1.appRoleMember.list',
   'bitable.v1.appRoleMember.batchCreate',
   'bitable.v1.appRoleMember.batchDelete',
+  'drive.v1.permissionMember.list',
+  'drive.v1.permissionMember.create',
 ]);
 
 try {
@@ -442,13 +636,15 @@ try {
   fieldsByTable.set(TABLES.tasks, await ensureUserField(client, TABLES.tasks, PERMISSION_HELPER_FIELD));
   fieldsByTable.set(TABLES.tasks, await ensureUserField(client, TABLES.tasks, PROJECT_MEMBERS_FIELD));
   fieldsByTable.set(TABLES.invoiceProgress, await ensureUserField(client, TABLES.invoiceProgress, PERMISSION_HELPER_FIELD));
+  fieldsByTable.set(TABLES.invoiceProgress, await ensureCreatedUserField(client, TABLES.invoiceProgress, '创建人'));
   fieldsByTable.set(TABLES.oldPlan, await ensureUserField(client, TABLES.oldPlan, PERMISSION_HELPER_FIELD));
   fieldsByTable.set(TABLES.supplierPayments, await ensureUserField(client, TABLES.supplierPayments, PERMISSION_HELPER_FIELD));
+  const fieldSettings = await applyFieldSettings(client, fieldsByTable);
 
   const [peopleRows, projectRows, managerChangeRows, leadRows, taskRows, oldPlanRows, supplierRows] = await Promise.all([
     searchAll(client, APP_TOKEN, TABLES.people, ['员工姓名', '飞书用户', '系统身份', '是否在职', '权限角色状态']),
     searchAll(client, APP_TOKEN, TABLES.overview, ['项目编号', '当前项目负责人', '交接协同人', '项目参与人员', '负责人交接状态']),
-    searchAll(client, APP_TOKEN, TABLES.managerChanges, ['变更记录编号', '项目编号', '新当前负责人', '生效日期', '创建时间', '关联项目']),
+    searchAll(client, APP_TOKEN, TABLES.managerChanges, ['变更记录编号', '项目编号', '原当前负责人', '新当前负责人', '生效日期', '创建时间', '变更原因', '关联项目']),
     searchAll(client, APP_TOKEN, TABLES.leads, existingNames(fieldsByTable.get(TABLES.leads), ['关联正式项目', PERMISSION_HELPER_FIELD])),
     searchAll(client, APP_TOKEN, TABLES.tasks, ['关联项目', '项目编号', PERMISSION_HELPER_FIELD, PROJECT_MEMBERS_FIELD]),
     searchAll(client, APP_TOKEN, TABLES.oldPlan, ['关联项目', '项目编号', PERMISSION_HELPER_FIELD]),
@@ -456,6 +652,16 @@ try {
   ]);
   const people = normalizedPeople(peopleRows);
   const peopleById = new Map(people.map((person) => [person.userId, person]).filter(([id]) => id));
+  const collaborators = await listCollaborators(client);
+  const collaboratorUserIds = new Set(collaborators
+    .filter((member) => member.member_type === 'openid')
+    .map((member) => member.member_id)
+    .filter(Boolean));
+  const fullAccessUserIds = new Set(collaborators
+    .filter((member) => member.member_type === 'openid' && member.perm === 'full_access')
+    .map((member) => member.member_id)
+    .filter(Boolean));
+  const collaboratorSync = await ensureCollaborators(client, people, collaboratorUserIds);
 
   const explicitManagerChanges = managerChangeUpdates(managerChangeRows, projectRows);
   const managerChangeProjectUpdated = await batchUpdate(client, TABLES.overview, explicitManagerChanges.projectUpdates);
@@ -517,17 +723,20 @@ try {
 
   const roles = await listRoles(client);
   const payloads = rolePayloads(tables, fieldsByTable);
-  await updateRole(client, roles.get('管理员'), payloads.admin);
-  await updateRole(client, roles.get('项目负责人'), payloads.manager);
-  await updateRole(client, roles.get('普通员工'), payloads.employee);
+  roles.set('管理员', await updateRole(client, roles.get('管理员'), payloads.admin));
+  roles.set('项目负责人', await updateRole(client, roles.get('项目负责人'), payloads.manager));
+  roles.set('普通员工', await updateRole(client, roles.get('普通员工'), payloads.employee));
 
-  const memberships = desiredRoleMemberships(people);
+  const memberships = desiredRoleMemberships(people, { fullAccessUserIds });
   const memberSync = {
     admin: await syncRoleMembers(client, roles.get('管理员').role_id, memberships.admin),
     manager: await syncRoleMembers(client, roles.get('项目负责人').role_id, memberships.manager),
     employee: await syncRoleMembers(client, roles.get('普通员工').role_id, memberships.employee),
   };
-  const failedMemberIds = new Set(Object.values(memberSync).flatMap((sync) => sync.errors.map((error) => error.id)));
+  const failedMemberIds = new Set([
+    ...Object.values(memberSync).flatMap((sync) => sync.errors.map((error) => error.id)),
+    ...collaboratorSync.errors.map((error) => error.userId),
+  ]);
   const finalMemberships = DRY_RUN
     ? {
       管理员: memberships.admin,
@@ -535,10 +744,16 @@ try {
       普通员工: memberships.employee,
     }
     : {
-      管理员: new Set((await listRoleMembers(client, roles.get('管理员').role_id)).map((member) => member.open_id).filter(Boolean)),
+      管理员: new Set([
+        ...(await listRoleMembers(client, roles.get('管理员').role_id)).map((member) => member.open_id).filter(Boolean),
+        ...fullAccessUserIds,
+      ]),
       项目负责人: new Set((await listRoleMembers(client, roles.get('项目负责人').role_id)).map((member) => member.open_id).filter(Boolean)),
       普通员工: new Set((await listRoleMembers(client, roles.get('普通员工').role_id)).map((member) => member.open_id).filter(Boolean)),
     };
+  if (DRY_RUN) {
+    for (const userId of fullAccessUserIds) finalMemberships.管理员.add(userId);
+  }
   const peopleStatusUpdates = peopleRows.map((row) => {
     const userId = peopleValue(row.fields?.['飞书用户'])[0]?.id || '';
     return {
@@ -555,10 +770,18 @@ try {
     };
   });
   const peopleStatusUpdated = await batchUpdate(client, TABLES.people, peopleStatusUpdates);
+  const roleMemberErrorCount = Object.values(memberSync).reduce((sum, sync) => sum + sync.errors.length, 0);
+  const syncErrorCount = roleMemberErrorCount + collaboratorSync.errors.length;
 
   console.log(JSON.stringify({
     dry_run: DRY_RUN,
+    ok: syncErrorCount === 0,
     tables: tables.length,
+    field_settings: {
+      planned: fieldSettings.planned,
+      updated: fieldSettings.updated,
+      descriptions_need_manual_update: fieldSettings.descriptions,
+    },
     manager_changes: {
       records: managerChangeRows.length,
       project_updates_planned: explicitManagerChanges.projectUpdates.length,
@@ -611,6 +834,11 @@ try {
         message: error.message,
       }))])),
     },
+    collaborators: {
+      existing: collaborators.length,
+      add_planned: collaboratorSync.planned.length,
+      add_failed: collaboratorSync.errors,
+    },
     people_role_status_updated: peopleStatusUpdated,
     protected: {
       source_tables: tables.filter((table) => table.name.startsWith(SOURCE_PREFIX)).length,
@@ -619,6 +847,7 @@ try {
       data_sync_document_manager_perm: 0,
     },
   }, null, 2));
+  if (!DRY_RUN && syncErrorCount) process.exitCode = 1;
 } finally {
   await client.close();
 }

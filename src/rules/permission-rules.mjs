@@ -20,35 +20,67 @@ export function uniquePeople(...groups) {
   return [...byId.values()];
 }
 
-export function buildPersonRecordRule(fields, { otherPermission = 0, permission } = {}) {
+export function buildPersonRecordRule(fields, { otherPermission = 0 } = {}) {
   if (!fields.length) throw new Error('Record rule requires at least one person field');
-  const rule = {
+  return {
     conditions: fields.map((field) => ({
       field_name: field.field_name,
-      field_type: field.type,
       operator: 'contains',
       value: [],
     })),
     conjunction: 'or',
-    display_rec_rule_version: 0,
     other_perm: otherPermission,
   };
-  if (permission !== undefined) rule.perm = permission;
-  return rule;
 }
 
-export function buildFieldPermissions(fields, { hidden = [], editable = [] } = {}) {
+export function recordRuleFields(fields, names) {
+  const requested = new Set(names);
+  return fields
+    .filter((field) => requested.has(field.field_name) && [11, 1003].includes(field.type))
+    .map((field) => ({
+      field_name: field.type === 1003 ? '' : field.field_name,
+      type: field.type,
+    }));
+}
+
+export function buildEditableTableRole(tableId, fields, {
+  personRuleFields,
+  addable = [],
+  editable = [],
+  allowAdd = false,
+  allowDelete = false,
+  viewPerm,
+}) {
+  const role = {
+    table_id: tableId,
+    table_perm: 2,
+    allow_add_record: allowAdd,
+    allow_delete_record: allowDelete,
+    field_perm: editable.length || addable.length ? buildFieldPermissions(fields, { addable, editable }) : {},
+    rec_rule: buildPersonRecordRule(recordRuleFields(fields, personRuleFields)),
+  };
+  if (viewPerm !== undefined) role.view_perm = viewPerm;
+  return role;
+}
+
+export function roleNeedsRebuild(role) {
+  return (role?.block_roles || []).some((block) => !block.block_id?.startsWith('blk'));
+}
+
+export function buildFieldPermissions(fields, { hidden = [], addable = [], editable = [] } = {}) {
   const hiddenSet = new Set(hidden);
+  const addableSet = new Set(addable);
   const editableSet = new Set(editable);
   return Object.fromEntries(fields.flatMap((field) => {
     const name = field.field_name;
     if (hiddenSet.has(name)) return [[name, 0]];
     if (editableSet.has(name)) return [[name, 3]];
+    if (addableSet.has(name)) return [[name, 2]];
     return [[name, 1]];
   }));
 }
 
-export function desiredRoleMemberships(rows) {
+export function desiredRoleMemberships(rows, { fullAccessUserIds = new Set() } = {}) {
   const result = {
     admin: new Set(),
     manager: new Set(),
@@ -59,6 +91,7 @@ export function desiredRoleMemberships(rows) {
     if (row.employmentStatus !== '在职') continue;
     const roles = ROLE_CHAIN[row.identity];
     if (!row.userId || !roles) continue;
+    if (fullAccessUserIds.has(row.userId)) continue;
     for (const role of roles) result[role].add(row.userId);
   }
   return result;
@@ -135,4 +168,21 @@ export function latestApplicableManagerChangeByProject(changes, { now = Date.now
     ));
   for (const change of applicable) result.set(change.projectNo, change);
   return result;
+}
+
+function yyyymmdd(now) {
+  return new Date(now).toISOString().slice(0, 10).replaceAll('-', '');
+}
+
+export function resolveManagerChangeRecordFields(change, projectByRecordId, { projectByNo = new Map(), now = Date.now() } = {}) {
+  const fields = {};
+  const linkedProject = (change.linkedProjectIds || []).map((id) => projectByRecordId.get(id)).find(Boolean);
+  const project = linkedProject || projectByNo.get(change.projectNo);
+  if (!project) return fields;
+
+  if (project.projectNo && change.projectNo !== project.projectNo) fields['项目编号'] = project.projectNo;
+  if (!change.changeNo && project.projectNo) fields['变更记录编号'] = `${yyyymmdd(now)}-${project.projectNo}-负责人变更`;
+  if (!change.oldManagers?.length && project.currentManagers?.length) fields['原当前负责人'] = uniquePeople(project.currentManagers);
+  if (!linkedProject && project.recordId) fields['关联项目'] = [project.recordId];
+  return fields;
 }

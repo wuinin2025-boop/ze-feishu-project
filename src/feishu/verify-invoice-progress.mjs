@@ -203,6 +203,7 @@ try {
 
   fs.writeFileSync(REPORT_PATH, markdown(report, samples));
   console.log(JSON.stringify(report, null, 2));
+  if (!report.pass) process.exitCode = 1;
 } finally {
   await client.close();
 }

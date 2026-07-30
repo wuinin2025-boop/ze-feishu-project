@@ -4,8 +4,50 @@ import { APP_TOKEN } from '../config.mjs';
 import { callJson, connectFeishu } from './client.mjs';
 
 const DRY_RUN = process.argv.includes('--dry-run');
+const INVOICE_OVERDUE_VISIBLE_FIELDS = [
+  '记录标题',
+  '项目编号',
+  '项目名称',
+  '当前权限负责人',
+  '当前执行期次',
+  '当前计划开票金额',
+  '计划开票日期',
+  '预计回款日期',
+  '实际开票金额',
+  '回款金额',
+  '未开票金额',
+  '未回款金额',
+  '开票逾期天数',
+  '回款逾期天数',
+  '逾期金额',
+  '回款逾期金额',
+  '开票状态',
+  '回款状态',
+  '综合状态',
+  '发票备注',
+];
 
 const TABLES = {
+  managerChanges: {
+    tableId: 'tblqjuBHdOjt3yWi',
+    tableName: '系统_负责人变更记录表',
+    views: [
+      {
+        viewName: '全部记录',
+        hiddenFields: [
+          '项目编号',
+          '父记录',
+        ],
+      },
+      {
+        viewName: '全部负责人变更',
+        hiddenFields: [
+          '项目编号',
+          '父记录',
+        ],
+      },
+    ],
+  },
   tasks: {
     tableId: 'tblMqbOebPtzjEdH',
     tableName: '项目进度表',
@@ -75,6 +117,16 @@ const TABLES = {
           '最后同步时间',
         ],
       },
+      {
+        viewName: '开票逾期',
+        visibleFields: INVOICE_OVERDUE_VISIBLE_FIELDS,
+        filter: { fieldName: '开票状态', value: '开票逾期' },
+      },
+      {
+        viewName: '回款逾期',
+        visibleFields: INVOICE_OVERDUE_VISIBLE_FIELDS,
+        filter: { fieldName: '回款状态', value: '回款逾期' },
+      },
     ],
   },
 };
@@ -104,12 +156,29 @@ async function createGridView(client, tableId, viewName) {
   return { ...data.view, created: true };
 }
 
-async function patchHiddenFields(client, tableId, viewId, hiddenFieldIds) {
+async function patchViewProperty(client, tableId, viewId, property) {
   if (DRY_RUN) return;
   await callJson(client, 'bitable_v1_appTableView_patch', {
     path: { app_token: APP_TOKEN, table_id: tableId, view_id: viewId },
-    data: { property: { hidden_fields: hiddenFieldIds } },
+    data: { property },
   });
+}
+
+function conditionValue(field, requested) {
+  if ([3, 4].includes(field.type)) {
+    const option = field.property?.options?.find((item) => item.name === requested);
+    if (!option) throw new Error(`Option not found: ${field.field_name}=${requested}`);
+    return JSON.stringify([option.id]);
+  }
+  return requested;
+}
+
+function hiddenFieldNamesForSpec(fields, spec) {
+  if (spec.visibleFields) {
+    const visible = new Set(spec.visibleFields);
+    return fields.flatMap((field) => visible.has(field.field_name) ? [] : [field.field_name]);
+  }
+  return spec.hiddenFields || [];
 }
 
 function resolveHiddenFields(fields, hiddenFieldNames) {
@@ -131,6 +200,22 @@ function resolveHiddenFields(fields, hiddenFieldNames) {
     hidden.push({ field_name: name, field_id: field.field_id });
   }
   return { hidden, missing, primary };
+}
+
+function resolveFilter(fields, filter) {
+  if (!filter) return undefined;
+  const field = fields.find((item) => item.field_name === filter.fieldName);
+  if (!field) return { missing: filter.fieldName };
+  return {
+    filterInfo: {
+      conjunction: 'and',
+      conditions: [{
+        field_id: field.field_id,
+        operator: 'is',
+        value: conditionValue(field, filter.value),
+      }],
+    },
+  };
 }
 
 const client = await connectFeishu([
@@ -161,15 +246,18 @@ try {
     for (const spec of table.views) {
       const existing = views.find((view) => view.view_name === spec.viewName);
       const view = existing || await createGridView(client, table.tableId, spec.viewName);
-      const { hidden, missing, primary } = resolveHiddenFields(fields, spec.hiddenFields);
-      await patchHiddenFields(client, table.tableId, view.view_id, hidden.map((field) => field.field_id));
+      const { hidden, missing, primary } = resolveHiddenFields(fields, hiddenFieldNamesForSpec(fields, spec));
+      const filter = resolveFilter(fields, spec.filter);
+      const property = { hidden_fields: hidden.map((field) => field.field_id) };
+      if (filter?.filterInfo) property.filter_info = filter.filterInfo;
+      await patchViewProperty(client, table.tableId, view.view_id, property);
       tableReport.views.push({
         view: spec.viewName,
         view_id: view.view_id,
         action: existing ? 'updated' : 'created',
         hidden_fields: hidden.map((field) => field.field_name),
         protected_primary_fields: primary,
-        missing_fields: missing,
+        missing_fields: filter?.missing ? [...missing, filter.missing] : missing,
       });
     }
 

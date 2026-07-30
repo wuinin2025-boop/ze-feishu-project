@@ -4,12 +4,26 @@ Clean implementation for the Feishu project center.
 
 ## Continue on a New Computer
 
+Before running the scripts, install Node.js 20+, sign in to Codex, and authorize the Feishu MCP connection for the target base.
+
+For a completely new computer:
+
 ```bash
 git clone https://github.com/wuinin2025-boop/ze-feishu-project.git
 cd ze-feishu-project
 npm install
 npm test
 npm run verify:invoice
+npm run sync:all -- --dry-run
+```
+
+For a computer where the repository already exists:
+
+```bash
+cd /path/to/ze-feishu-project
+git pull origin main
+npm install
+npm test
 ```
 
 To actually refresh Feishu trial data:
@@ -30,6 +44,14 @@ To run the local business sync control flow:
 ```bash
 npm run sync:all
 ```
+
+To open the local clickable control page:
+
+```bash
+npm run control
+```
+
+Keep that terminal window open, then open `http://localhost:3000`. If port 3000 is busy, run `PORT=3001 npm run control` and open `http://localhost:3001`.
 
 Chinese operating notes:
 
@@ -60,6 +82,8 @@ Daily operating views:
 - `项目进度表` -> `日常任务`
 - `（旧项目）开票计划补录表` -> `日常补录`
 - `项目开票进度表` -> `日常开票进度`
+- `项目开票进度表` -> `开票逾期`
+- `项目开票进度表` -> `回款逾期`
 
 Latest validation report:
 
