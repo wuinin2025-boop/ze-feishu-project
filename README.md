@@ -25,6 +25,16 @@ To refresh the simplified daily views used by non-technical users:
 npm run sync:views
 ```
 
+To run the local business sync control flow:
+
+```bash
+npm run sync:all
+```
+
+Chinese operating notes:
+
+- `docs/local-sync-control.md`
+
 Prerequisites:
 
 - Node.js 20+.
