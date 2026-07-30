@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   APP_TOKEN,
   SOURCE_TABLES,
@@ -14,7 +15,7 @@ import {
   textValue,
 } from './client.mjs';
 
-const REPORT_PATH = '/Users/inin/Desktop/in/ze-feishu-project/docs/trial-results/2026-07-30-invoice-progress-verification.md';
+const REPORT_PATH = fileURLToPath(new URL('../../docs/trial-results/2026-07-30-invoice-progress-verification.md', import.meta.url));
 
 async function listTables(client) {
   const items = [];
