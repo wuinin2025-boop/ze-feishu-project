@@ -112,7 +112,11 @@ try {
   ]);
   const activeUnsynced = people.filter((row) => (
     textValue(row.fields?.['是否在职']) === '在职'
-    && textValue(row.fields?.['权限角色状态']) !== '已同步'
+    && !['已同步', '同步失败'].includes(textValue(row.fields?.['权限角色状态']))
+  ));
+  const activeSyncFailed = people.filter((row) => (
+    textValue(row.fields?.['是否在职']) === '在职'
+    && textValue(row.fields?.['权限角色状态']) === '同步失败'
   ));
   const departedWithRoles = people.filter((row) => {
     if (textValue(row.fields?.['是否在职']) !== '离职') return false;
@@ -130,6 +134,7 @@ try {
     manager_cannot_edit_project_owner: true,
     employee_finance_perm: 0,
     active_unsynced_people: activeUnsynced.length,
+    active_sync_failed_people: activeSyncFailed.length,
     departed_people_with_roles: departedWithRoles.length,
   }, null, 2));
 } finally {

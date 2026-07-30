@@ -203,21 +203,32 @@ async function syncRoleMembers(client, roleId, desiredIds) {
   const desired = new Set(desiredIds);
   const add = [...desired].filter((id) => !current.has(id));
   const remove = [...current].filter((id) => !desired.has(id));
+  const errors = [];
   if (!DRY_RUN) {
     for (const id of add) {
-      await callJson(client, 'bitable_v1_appRoleMember_batchCreate', {
-        path: { app_token: APP_TOKEN, role_id: roleId },
-        data: { member_list: [{ type: 'open_id', id }] },
-      });
+      try {
+        await callJson(client, 'bitable_v1_appRoleMember_batchCreate', {
+          path: { app_token: APP_TOKEN, role_id: roleId },
+          data: { member_list: [{ type: 'open_id', id }] },
+        });
+      } catch (error) {
+        errors.push({ action: 'add', id, message: error.message });
+      }
     }
     if (remove.length) {
-      await callJson(client, 'bitable_v1_appRoleMember_batchDelete', {
-        path: { app_token: APP_TOKEN, role_id: roleId },
-        data: { member_list: remove.map((id) => ({ type: 'open_id', id })) },
-      });
+      for (const id of remove) {
+        try {
+          await callJson(client, 'bitable_v1_appRoleMember_batchDelete', {
+            path: { app_token: APP_TOKEN, role_id: roleId },
+            data: { member_list: [{ type: 'open_id', id }] },
+          });
+        } catch (error) {
+          errors.push({ action: 'remove', id, message: error.message });
+        }
+      }
     }
   }
-  return { desired: [...desired], add, remove };
+  return { desired: [...desired], add, remove, errors };
 }
 
 function normalizedPeople(rows) {
@@ -440,6 +451,7 @@ try {
     manager: await syncRoleMembers(client, roles.get('项目负责人').role_id, memberships.manager),
     employee: await syncRoleMembers(client, roles.get('普通员工').role_id, memberships.employee),
   };
+  const failedMemberIds = new Set(Object.values(memberSync).flatMap((sync) => sync.errors.map((error) => error.id)));
   const finalMemberships = DRY_RUN
     ? {
       管理员: memberships.admin,
@@ -461,6 +473,7 @@ try {
           identity: textValue(row.fields?.['系统身份']),
           userId,
           roleMemberships: finalMemberships,
+          syncFailed: failedMemberIds.has(userId),
         }),
       },
     };
@@ -498,7 +511,13 @@ try {
       changes: Object.fromEntries(Object.entries(memberSync).map(([key, value]) => [key, {
         add: value.add.length,
         remove: value.remove.length,
+        errors: value.errors.length,
       }])),
+      errors: Object.fromEntries(Object.entries(memberSync).map(([key, value]) => [key, value.errors.map((error) => ({
+        action: error.action,
+        user_id: error.id,
+        message: error.message,
+      }))])),
     },
     people_role_status_updated: peopleStatusUpdated,
     protected: {
