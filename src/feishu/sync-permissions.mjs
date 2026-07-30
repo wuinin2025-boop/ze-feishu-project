@@ -338,7 +338,7 @@ function rolePayloads(tables, fieldsByTable) {
       allowAdd: true,
     })],
     [TABLES.invoiceProgress, readableRole(TABLES.invoiceProgress, fieldsByTable.get(TABLES.invoiceProgress), {
-      personRuleFields: [PERMISSION_HELPER_FIELD],
+      personRuleFields: [PERMISSION_HELPER_FIELD, '当前权限负责人'],
       hidden: ['记录标题', '数据来源', '最后同步时间'],
       fieldPermissions: false,
     })],
