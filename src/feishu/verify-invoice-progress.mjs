@@ -50,7 +50,7 @@ function projectRows(rows, matcher) {
     return matcher({
       projectNo: textValue(fields['项目编号']),
       projectName: textValue(fields['项目名称']),
-      sourceKey: textValue(fields['源记录键']),
+      sourceKey: textValue(fields['记录标题']),
     });
   });
 }
@@ -155,7 +155,7 @@ try {
   const rows009 = projectRows(progress, ({ projectNo }) => projectNo === 'YS260727LUFFY');
   const rows012 = projectRows(progress, ({ projectNo }) => projectNo === 'E26 TEST');
   const testRows = projectRows(progress, ({ projectNo }) => projectNo === 'E2016test');
-  const blankKeyRows = progress.filter((row) => !textValue(row.fields?.['源记录键']));
+  const blankKeyRows = progress.filter((row) => !textValue(row.fields?.['记录标题']));
   const manualRows = progress.filter((row) => ['待人工确认', '待人工补充'].includes(textValue(row.fields?.['生成状态'])));
   const splitRows = progress.filter((row) => textValue(row.fields?.['差异状态']) === '实际拆分开票');
   const autoOldPlanRows = oldPlan.filter((row) => textValue(row.fields?.['源记录键']).startsWith('old-plan|'));
@@ -167,7 +167,7 @@ try {
 
   check('202607270009 作为新项目进入试运行表', rows009.length >= 1, `rows=${rows009.length}`);
   check('202607270006-008 测试记录未进入正式逻辑', testRows.length === 0, `E2016test rows=${testRows.length}`);
-  check('每条进度记录都有源记录键', blankKeyRows.length === 0, `blank=${blankKeyRows.length}`);
+  check('每条进度记录都有记录标题', blankKeyRows.length === 0, `blank=${blankKeyRows.length}`);
   check('发票归集回款金额等于源发票收款额', Math.abs(collectionReceived - sourceInvoiceReceived) < 0.01, `collection=${collectionReceived}, source=${sourceInvoiceReceived}`);
   check('202607270012 样例存在', rows012.length >= 1, `rows=${rows012.length}`);
   check('试运行表有待人工确认/补充视图数据', manualRows.length > 0, `manual=${manualRows.length}`);

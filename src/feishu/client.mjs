@@ -28,12 +28,20 @@ function parseStringAssignments(section) {
 
 export async function connectFeishu(toolNames) {
   const text = fs.readFileSync(CONFIG_PATH, 'utf8');
-  const base = parseStringAssignments(readSection(text, 'mcp_servers.feishu-project-center'));
-  const env = parseStringAssignments(readSection(text, 'mcp_servers.feishu-project-center.env'));
-  const args = ['-y', '@larksuiteoapi/lark-mcp', 'mcp', '--token-mode', 'tenant_access_token', '-l', 'zh'];
-  if (toolNames?.length) args.push('-t', toolNames.join(','));
+  const sectionName = text.includes('[mcp_servers.feishu-project-center]')
+    ? 'mcp_servers.feishu-project-center'
+    : 'mcp_servers.feishu-base';
+  const base = parseStringAssignments(readSection(text, sectionName));
+  const env = text.includes(`[${sectionName}.env]`)
+    ? parseStringAssignments(readSection(text, `${sectionName}.env`))
+    : {};
+  const command = base.command || 'npx';
+  const args = command.endsWith('feishu-base.sh')
+    ? []
+    : ['-y', '@larksuiteoapi/lark-mcp', 'mcp', '--token-mode', 'tenant_access_token', '-l', 'zh'];
+  if (toolNames?.length && args.length) args.push('-t', toolNames.join(','));
   const transport = new StdioClientTransport({
-    command: base.command || 'npx',
+    command,
     args,
     env: { ...process.env, ...env },
   });

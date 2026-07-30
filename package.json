@@ -7,6 +7,7 @@
     "test": "node --test",
     "schema:invoice": "node src/feishu/schema.mjs",
     "sync:invoice": "node src/feishu/sync-invoice-progress.mjs",
+    "sync:project-status": "node src/feishu/sync-project-status.mjs",
     "verify:invoice": "node src/feishu/verify-invoice-progress.mjs"
   },
   "dependencies": {

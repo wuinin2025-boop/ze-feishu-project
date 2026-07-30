@@ -28,7 +28,7 @@ export const SELECT_OPTIONS = {
 };
 
 export const INVOICE_PROGRESS_FIELDS = [
-  { name: '源记录键', type: 1, uiType: 'Text' },
+  { name: '记录标题', type: 1, uiType: 'Text' },
   { name: '项目编号', type: 1, uiType: 'Text' },
   { name: '项目名称', type: 1, uiType: 'Text' },
   { name: '客户名称', type: 1, uiType: 'Text' },
@@ -48,8 +48,10 @@ export const INVOICE_PROGRESS_FIELDS = [
   { name: '回款金额', type: 2, uiType: 'Number' },
   { name: '未开票金额', type: 2, uiType: 'Number' },
   { name: '未回款金额', type: 2, uiType: 'Number' },
-  { name: '逾期天数', type: 2, uiType: 'Number' },
+  { name: '开票逾期天数', type: 2, uiType: 'Number' },
+  { name: '回款逾期天数', type: 2, uiType: 'Number' },
   { name: '逾期金额', type: 2, uiType: 'Number' },
+  { name: '回款逾期金额', type: 2, uiType: 'Number' },
   { name: '开票状态', type: 3, uiType: 'SingleSelect', optionsKey: 'invoiceStatus' },
   { name: '回款状态', type: 3, uiType: 'SingleSelect', optionsKey: 'paymentStatus' },
   { name: '综合状态', type: 3, uiType: 'SingleSelect', optionsKey: 'overallStatus' },

@@ -153,17 +153,17 @@ async function batchDelete(client, tableName, tableId, recordIds) {
   return count;
 }
 
-async function upsertByKey(client, tableName, tableId, rows, { prune = false, pruneKey = () => true } = {}) {
-  const existing = await searchAll(client, APP_TOKEN, tableId, ['源记录键']);
-  const existingByKey = new Map(existing.map((record) => [textValue(record.fields?.['源记录键']), record.record_id]).filter(([key]) => key));
-  const desiredKeys = new Set(rows.map((row) => textValue(row['源记录键'])).filter(Boolean));
+async function upsertByKey(client, tableName, tableId, rows, { keyField = '源记录键', prune = false, pruneKey = () => true } = {}) {
+  const existing = await searchAll(client, APP_TOKEN, tableId, [keyField]);
+  const existingByKey = new Map(existing.map((record) => [textValue(record.fields?.[keyField]), record.record_id]).filter(([key]) => key));
+  const desiredKeys = new Set(rows.map((row) => textValue(row[keyField])).filter(Boolean));
   const staleRecordIds = prune
     ? [...existingByKey].flatMap(([key, recordId]) => !desiredKeys.has(key) && pruneKey(key) ? [recordId] : [])
     : [];
   const creates = [];
   const updates = [];
   for (const row of rows) {
-    const key = textValue(row['源记录键']);
+    const key = textValue(row[keyField]);
     if (!key) continue;
     const clean = Object.fromEntries(Object.entries(row).filter(([, value]) => value !== undefined && value !== ''));
     const recordId = existingByKey.get(key);
@@ -285,6 +285,7 @@ function oldPlanRow(project, node) {
 }
 
 function progressRow(project, node, dataSource) {
+  const recordTitle = buildProgressKey({ projectNo: project.projectNo, executionPeriod: node.executionPeriod, invoiceNo: node.invoiceNo });
   const invoiceStatus = deriveInvoiceStatus({
     planDate: node.planDate || node.originalPlanDate,
     planAmount: node.currentPlanAmount,
@@ -305,7 +306,7 @@ function progressRow(project, node, dataSource) {
   const uninvoiced = Math.max((node.currentPlanAmount || 0) - (node.actualInvoiceAmount || 0), 0);
   const unpaid = Math.max((node.actualInvoiceAmount || 0) - (node.receivedAmount || 0), 0);
   return {
-    '源记录键': buildProgressKey({ projectNo: project.projectNo, executionPeriod: node.executionPeriod, invoiceNo: node.invoiceNo }),
+    '记录标题': recordTitle,
     '项目编号': project.projectNo,
     '项目名称': project.projectName,
     '客户名称': project.customerName,
@@ -325,8 +326,10 @@ function progressRow(project, node, dataSource) {
     '回款金额': node.receivedAmount || 0,
     '未开票金额': uninvoiced,
     '未回款金额': unpaid,
-    '逾期天数': Math.max(invoiceOverdueDays, paymentOverdueDays),
+    '开票逾期天数': invoiceOverdueDays,
+    '回款逾期天数': paymentOverdueDays,
     '逾期金额': paymentStatus === '回款逾期' ? unpaid : invoiceStatus === '开票逾期' ? uninvoiced : 0,
+    '回款逾期金额': paymentStatus === '回款逾期' ? unpaid : 0,
     '开票状态': invoiceStatus,
     '回款状态': paymentStatus,
     '综合状态': deriveOverallStatus({ invoiceStatus, paymentStatus, diffStatus }),
@@ -449,7 +452,7 @@ try {
     TARGET_TABLE_NAMES.invoiceProgressTrial,
     tableIds.get(TARGET_TABLE_NAMES.invoiceProgressTrial),
     rows.progressRows,
-    { prune: true },
+    { keyField: '记录标题', prune: true },
   );
 
   const report = {
