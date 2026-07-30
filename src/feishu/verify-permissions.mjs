@@ -91,6 +91,8 @@ try {
   const managerInvoiceProgress = managerTables.get(TABLES.invoiceProgress);
   assert.equal(managerInvoiceProgress.table_perm, 1);
   assert.deepEqual(rulePersonFields(managerInvoiceProgress.rec_rule), ['当前权限负责人']);
+  const managerOldPlan = managerTables.get(TABLES.oldPlan);
+  assert.equal(managerOldPlan.field_perm?.['权限_可管理人员'], 1);
   assert.equal(managerTables.get(TABLES.invoiceCollection)?.table_perm ?? 0, 0);
   assert.equal(employeeTables.get(TABLES.invoiceProgress)?.table_perm ?? 0, 0);
   assert.equal(employeeTables.get(TABLES.oldPlan)?.table_perm ?? 0, 0);

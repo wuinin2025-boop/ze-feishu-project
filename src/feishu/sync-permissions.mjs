@@ -271,7 +271,6 @@ function rolePayloads(tables, fieldsByTable) {
     [TABLES.tasks, editableRole(TABLES.tasks, fieldsByTable.get(TABLES.tasks), {
       personRuleFields: [PERMISSION_HELPER_FIELD],
       editable: ['任务名称', '关联项目', '任务执行人员', '开始时间', '结束时间', '优先级', '预计工时（小时）', '实际工时（小时）', '实际完成时间', '任务状态', '风险等级', '风险或阻碍'],
-      hidden: [PERMISSION_HELPER_FIELD],
       allowAdd: true,
     })],
     [TABLES.invoiceProgress, readableRole(TABLES.invoiceProgress, fieldsByTable.get(TABLES.invoiceProgress), {
@@ -281,13 +280,13 @@ function rolePayloads(tables, fieldsByTable) {
     [TABLES.oldPlan, editableRole(TABLES.oldPlan, fieldsByTable.get(TABLES.oldPlan), {
       personRuleFields: [PERMISSION_HELPER_FIELD],
       editable: ['关联项目', '预计开票总次数', '开票期次', '计划开票日期', '计划开票金额', '预计回款日期', '备注', '发票备注'],
-      hidden: ['同步到应收记录', '同步状态', '同步结果说明', '同步时间', '源记录键', PERMISSION_HELPER_FIELD],
+      hidden: ['同步到应收记录', '同步状态', '同步结果说明', '同步时间', '源记录键'],
       allowAdd: true,
     })],
     [TABLES.supplierPayments, editableRole(TABLES.supplierPayments, fieldsByTable.get(TABLES.supplierPayments), {
       personRuleFields: [PERMISSION_HELPER_FIELD],
       editable: ['预计付款日期', '付款状态', '实际付款日期', '实际付款金额', '付款备注'],
-      hidden: ['源付款申请记录ID', '关联付款申请', '关联PO', '数据匹配状态', PERMISSION_HELPER_FIELD],
+      hidden: ['源付款申请记录ID', '关联付款申请', '关联PO', '数据匹配状态'],
     })],
   ]);
   const employeeRoles = new Map([
