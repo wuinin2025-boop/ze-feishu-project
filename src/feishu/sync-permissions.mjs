@@ -100,19 +100,20 @@ function editableRole(tableId, fields, { personRuleFields, editable = [], hidden
       hidden: existingNames(fields, hidden),
     }),
     field_action_rules: { select_option_edit: optionRules(fields, hidden) },
-    rec_rule: buildPersonRecordRule(personFields(fields, personRuleFields)),
+    rec_rule: buildPersonRecordRule(personFields(fields, personRuleFields), { permission: 2 }),
   };
 }
 
-function readableRole(tableId, fields, { personRuleFields, hidden = [] }) {
-  return {
+function readableRole(tableId, fields, { personRuleFields, hidden = [], fieldPermissions = true }) {
+  const role = {
     table_id: tableId,
     table_perm: 1,
     allow_add_record: false,
     allow_delete_record: false,
-    field_perm: buildFieldPermissions(fields, { hidden: existingNames(fields, hidden) }),
-    rec_rule: buildPersonRecordRule(personFields(fields, personRuleFields)),
+    rec_rule: buildPersonRecordRule(personFields(fields, personRuleFields), { permission: 1 }),
   };
+  if (fieldPermissions) role.field_perm = buildFieldPermissions(fields, { hidden: existingNames(fields, hidden) });
+  return role;
 }
 
 async function listTables(client) {
@@ -276,6 +277,7 @@ function rolePayloads(tables, fieldsByTable) {
     [TABLES.invoiceProgress, readableRole(TABLES.invoiceProgress, fieldsByTable.get(TABLES.invoiceProgress), {
       personRuleFields: [PERMISSION_HELPER_FIELD],
       hidden: ['记录标题', '数据来源', '最后同步时间'],
+      fieldPermissions: false,
     })],
     [TABLES.oldPlan, editableRole(TABLES.oldPlan, fieldsByTable.get(TABLES.oldPlan), {
       personRuleFields: [PERMISSION_HELPER_FIELD],

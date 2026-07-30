@@ -52,10 +52,11 @@ test('field and record permission helpers preserve manager owner restrictions', 
     { field_name: '交接协同人', type: 11 },
   ]), {
     conditions: [
-      { field_name: '当前项目负责人', operator: 'contains', value: [] },
-      { field_name: '交接协同人', operator: 'contains', value: [] },
+      { field_name: '当前项目负责人', field_type: 11, operator: 'contains', value: [] },
+      { field_name: '交接协同人', field_type: 11, operator: 'contains', value: [] },
     ],
     conjunction: 'or',
+    display_rec_rule_version: 0,
     other_perm: 0,
   });
   assert.deepEqual(buildFieldPermissions([

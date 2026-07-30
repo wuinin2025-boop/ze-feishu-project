@@ -20,17 +20,21 @@ export function uniquePeople(...groups) {
   return [...byId.values()];
 }
 
-export function buildPersonRecordRule(fields, { otherPermission = 0 } = {}) {
+export function buildPersonRecordRule(fields, { otherPermission = 0, permission } = {}) {
   if (!fields.length) throw new Error('Record rule requires at least one person field');
-  return {
+  const rule = {
     conditions: fields.map((field) => ({
       field_name: field.field_name,
+      field_type: field.type,
       operator: 'contains',
       value: [],
     })),
     conjunction: 'or',
+    display_rec_rule_version: 0,
     other_perm: otherPermission,
   };
+  if (permission !== undefined) rule.perm = permission;
+  return rule;
 }
 
 export function buildFieldPermissions(fields, { hidden = [], editable = [] } = {}) {
