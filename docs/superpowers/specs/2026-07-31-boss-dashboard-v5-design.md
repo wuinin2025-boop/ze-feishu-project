@@ -1,133 +1,163 @@
-# Boss Dashboard V5 Design
+# 老板驾驶舱 V5 设计方案
 
-## Goal
+## 目标
 
-Build a boss-facing Feishu dashboard that does not require local scripts for dashboard refresh. The dashboard should help the boss answer four questions quickly:
+建设一个面向老板使用的飞书驾驶舱，并且驾驶舱数据不依赖本地脚本手动刷新。
 
-- What is the current business and cash position?
-- What will be invoiced and collected soon?
-- Which projects are overdue, and who is responsible?
-- Is the dashboard data complete enough to trust?
+老板打开驾驶舱后，需要快速回答四个问题：
 
-## Sources Checked
+- 现在整体业务盘子和现金情况怎么样？
+- 接下来一周、下个月预计开票和回款多少？
+- 哪些项目已经逾期，负责人是谁，金额和时间是什么？
+- 当前数据是否完整、可信，哪些地方还需要人工确认？
 
-- Feishu dashboard supports adding chart components such as line charts and other charts: https://www.feishu.cn/hc/zh-CN/articles/360049067678
-- Feishu dashboard supports filtering data and slicer components: https://www.feishu.cn/hc/zh-CN/articles/493084579750-%E5%9C%A8%E4%BB%AA%E8%A1%A8%E7%9B%98%E4%B8%AD%E7%AD%9B%E9%80%89%E6%95%B0%E6%8D%AE and https://www.feishu.cn/hc/zh-CN/articles/660924361907-%E4%BD%BF%E7%94%A8%E5%88%87%E7%89%87%E5%99%A8%E7%BB%84%E4%BB%B6%E7%AD%9B%E9%80%89%E4%BB%AA%E8%A1%A8%E7%9B%98%E6%95%B0%E6%8D%AE
-- Feishu dashboard components can use multiple source tables: https://www.feishu.cn/hc/zh-CN/articles/858919003989-%E4%BB%AA%E8%A1%A8%E7%9B%98%E7%BB%84%E4%BB%B6%E6%B7%BB%E5%8A%A0%E5%A4%9A%E4%B8%AA%E6%95%B0%E6%8D%AE%E6%BA%90%E8%A1%A8
-- Feishu automation runs actions after configured triggers and conditions: https://www.feishu.cn/hc/zh-CN/articles/665088655709-%E4%BD%BF%E7%94%A8%E5%A4%9A%E7%BB%B4%E8%A1%A8%E6%A0%BC%E8%87%AA%E5%8A%A8%E5%8C%96%E6%B5%81%E7%A8%8B
+## 已确认的飞书能力
 
-## Global Rules
+- 飞书多维表格仪表盘支持添加折线图、柱状图、饼图等图表组件：https://www.feishu.cn/hc/zh-CN/articles/360049067678
+- 飞书仪表盘支持筛选条件和切片器组件，可以按公司、分类、时间等维度筛选：
+  - https://www.feishu.cn/hc/zh-CN/articles/493084579750-%E5%9C%A8%E4%BB%AA%E8%A1%A8%E7%9B%98%E4%B8%AD%E7%AD%9B%E9%80%89%E6%95%B0%E6%8D%AE
+  - https://www.feishu.cn/hc/zh-CN/articles/660924361907-%E4%BD%BF%E7%94%A8%E5%88%87%E7%89%87%E5%99%A8%E7%BB%84%E4%BB%B6%E7%AD%9B%E9%80%89%E4%BB%AA%E8%A1%A8%E7%9B%98%E6%95%B0%E6%8D%AE
+- 飞书仪表盘组件支持使用多个数据源表：https://www.feishu.cn/hc/zh-CN/articles/858919003989-%E4%BB%AA%E8%A1%A8%E7%9B%98%E7%BB%84%E4%BB%B6%E6%B7%BB%E5%8A%A0%E5%A4%9A%E4%B8%AA%E6%95%B0%E6%8D%AE%E6%BA%90%E8%A1%A8
+- 飞书多维表格自动化流程支持按触发条件自动执行动作：https://www.feishu.cn/hc/zh-CN/articles/665088655709-%E4%BD%BF%E7%94%A8%E5%A4%9A%E7%BB%B4%E8%A1%A8%E6%A0%BC%E8%87%AA%E5%8A%A8%E5%8C%96%E6%B5%81%E7%A8%8B
 
-- `项目分类管理` remains manually maintained only in `项目总览表`.
-- Dashboard includes `经营项目` and `走账项目`.
-- Dashboard excludes `行政/内部项目`.
-- Global company filter must affect all cards, charts, and lists.
-- Use Feishu formulas, lookup fields, views, dashboard filters, and automation before local scripts.
-- Do not write to `源_` tables.
-- Do not touch `（旧项目）开票计划补录表` while manual backfill is active.
+## 总体规则
 
-## Dashboard Structure
+- `项目分类管理` 只在 `项目总览表` 里人工维护。
+- 老板驾驶舱只纳入 `经营项目` 和 `走账项目`。
+- `行政/内部项目` 不进入老板驾驶舱。
+- `总项目` 指 `经营项目 + 走账项目`，不包含行政/内部项目。
+- 保留当前已有的 `选择公司` 筛选，并让它影响所有指标卡、图表和清单。
+- 优先使用飞书公式、查找引用、视图、仪表盘筛选和飞书自动化流程。
+- 不再用本地脚本刷新老板驾驶舱。
+- 不写入任何 `源_` 表。
+- `（旧项目）开票计划补录表` 当前仍处于人工补录阶段，不创建、不更新、不清理、不迁移其中的数据。
 
-### Global Filters
+## 驾驶舱结构
 
-The dashboard should keep the existing company filter and add compatible filters where useful:
+### 顶部全局筛选
 
-- `选择公司`: 全部 / 集熠 / 冶堂 / 亦所
-- `项目分类`: 总项目 / 经营项目 / 走账项目
-- `时间范围`: 本月 / 下月 / 自定义
+保留现有的公司筛选，并补充兼容的筛选条件：
 
-All dashboard source tables must carry a company field, either native or lookup/formula:
+- `选择公司`：全部 / 集熠 / 冶堂 / 亦所
+- `项目分类`：总项目 / 经营项目 / 走账项目
+- `时间范围`：本月 / 下月 / 自定义
+
+为了让筛选能作用到所有组件，驾驶舱涉及的数据源表都需要有公司字段，可以是原生字段，也可以是通过关联项目带出的引用字段：
 
 - `项目总览表.立项公司`
 - `项目开票计划表.立项公司`
 - `开票明细统一表.立项公司`
-- `项目线索表.立项公司` or equivalent company field
+- `项目线索表.立项公司`，如果字段名不同，需要确认实际字段
 
-### First Screen
+### 第一屏：老板判断区
 
-Purpose: let the boss understand the current position and near-future cash movement within 30 seconds.
+第一屏的目标是让老板在 30 秒内判断当前公司经营和现金流状态。
 
-Cards:
+核心指标卡：
 
-- `总项目数`: count of `经营项目 + 走账项目`
-- `线索项目数`: effective leads count, plus overdue follow-up leads if available
-- `已开票金额`: sum of included invoice amount
-- `已收款金额`: sum of included received amount
-- `未收款金额`: `已开票金额 - 已收款金额`
-- `风险项目数`: projects with overdue invoice, overdue payment, amount exception, or missing classification
+- `总项目数`：统计 `经营项目 + 走账项目`
+- `线索项目数`：有效线索数量；如果线索表支持跟进日期，同时展示逾期跟进线索数量
+- `已开票金额`：统计纳入驾驶舱的有效开票金额
+- `已收款金额`：统计纳入驾驶舱的有效回款金额
+- `未收款金额`：`已开票金额 - 已收款金额`
+- `风险项目数`：存在逾期开票、逾期回款、金额异常、未分类等问题的项目数量
 
-Forecast cards:
+未来现金流指标卡：
 
-- `未来7天预计开票`: plan rows where planned invoice date is within the next 7 days and un-invoiced amount remains
-- `未来7天预计回款`: plan rows where expected payment date is within the next 7 days and unpaid amount remains
-- `下月预计开票`: plan rows where planned invoice date is next month and un-invoiced amount remains
-- `下月预计回款`: plan rows where expected payment date is next month and unpaid amount remains
+- `未来7天预计开票`：计划开票日期在未来 7 天内，且仍有未开票金额的计划
+- `未来7天预计回款`：预计回款日期在未来 7 天内，且仍有未收款金额的计划
+- `下月预计开票`：计划开票日期在下月，且仍有未开票金额的计划
+- `下月预计回款`：预计回款日期在下月，且仍有未收款金额的计划
 
-Charts:
+图表：
 
-- Monthly line chart: `计划开票金额`, `实际开票金额`, `实际回款金额`, `未收款余额`
-- Project structure chart: `经营项目`, `走账项目`, `线索项目`, `逾期项目`
+- `月度趋势折线图`
+  - 每月计划开票金额
+  - 每月实际开票金额
+  - 每月实际回款金额
+  - 每月未收款余额
 
-### Second Screen
+- `项目结构图`
+  - 经营项目
+  - 走账项目
+  - 线索项目
+  - 逾期项目
 
-Purpose: make risks actionable by showing project, person, amount, date, and next action.
+### 第二屏：老板问责区
 
-Lists:
+第二屏的目标是让老板知道具体该问谁、问什么、什么时候逾期、金额是多少。
 
-- `逾期开票项目清单`
-  - Project name
-  - Company
-  - Owner
-  - Planned invoice date
-  - Invoice overdue days
-  - Un-invoiced amount
+清单一：`逾期开票项目清单`
 
-- `逾期回款项目清单`
-  - Project name
-  - Company
-  - Owner
-  - Expected payment date
-  - Payment overdue days
-  - Unpaid amount
+必须包含：
 
-- `Top 未收款项目`
-  - Project name
-  - Company
-  - Owner
-  - Invoiced amount
-  - Received amount
-  - Unpaid amount
-  - Expected payment date
+- 项目名称
+- 所属公司
+- 项目负责人
+- 计划开票日期
+- 开票逾期天数
+- 未开票金额
 
-- `线索项目清单`
-  - Lead name
-  - Company
-  - Owner
-  - Expected amount
-  - Lead status
-  - Follow-up due date
-  - Follow-up overdue days
+清单二：`逾期回款项目清单`
 
-- `数据可信度检查`
-  - Missing classification projects
-  - Unmatched invoices
-  - Amount exception plans
-  - Projects without invoice plan
-  - Old-project backfill incomplete count
+必须包含：
 
-## Data Model
+- 项目名称
+- 所属公司
+- 项目负责人
+- 预计回款日期
+- 回款逾期天数
+- 未收款金额
 
-### Existing Tables To Use
+清单三：`高额未收款项目`
 
-- `项目总览表`: project classification, company, owner, project-level fields
-- `项目线索表`: lead count, effective leads, overdue lead follow-up
-- `项目开票计划表`: planned invoice and expected payment schedule
-- `开票明细统一表`: actual invoice and received data
-- `（旧项目）开票计划补录表`: read-only during manual backfill
+必须包含：
 
-### Fields Needed In `项目开票计划表`
+- 项目名称
+- 所属公司
+- 项目负责人
+- 已开票金额
+- 已收款金额
+- 未收款金额
+- 最近预计回款日期
 
-Required or already present:
+清单四：`线索项目清单`
+
+建议包含：
+
+- 线索名称
+- 所属公司
+- 负责人
+- 预计金额
+- 线索状态
+- 跟进截止日期
+- 跟进逾期天数
+
+清单五：`数据可信度检查`
+
+建议包含：
+
+- 未分类项目数
+- 未匹配发票数
+- 金额异常计划数
+- 缺少开票计划的项目数
+- 旧项目补录未完成数量
+
+## 数据来源
+
+### 直接使用的现有表
+
+- `项目总览表`：项目分类、公司、负责人、项目层级汇总字段
+- `项目线索表`：线索数量、有效线索、逾期跟进线索
+- `项目开票计划表`：计划开票和预计回款
+- `开票明细统一表`：实际开票和实际回款
+- `（旧项目）开票计划补录表`：当前只读参考，人工补录完成前不作为自动刷新源
+
+## 字段设计
+
+### `项目开票计划表` 需要的字段
+
+已有或应保留字段：
 
 - `关联项目`
 - `项目编号`
@@ -145,20 +175,20 @@ Required or already present:
 - `回款逾期天数`
 - `匹配状态`
 
-Add or verify:
+需要新增或确认的字段：
 
-- `立项公司`: lookup from `关联项目`
-- `当前项目负责人`: lookup from `关联项目`
-- `未来7天预计开票金额`: formula
-- `未来7天预计回款金额`: formula
-- `下月预计开票金额`: formula
-- `下月预计回款金额`: formula
-- `开票月份`: formula/date bucket
-- `回款月份`: formula/date bucket
+- `立项公司`：从 `关联项目` 查找引用
+- `当前项目负责人`：从 `关联项目` 查找引用
+- `未来7天预计开票金额`：公式字段
+- `未来7天预计回款金额`：公式字段
+- `下月预计开票金额`：公式字段
+- `下月预计回款金额`：公式字段
+- `开票月份`：用于月度趋势图的月份字段
+- `回款月份`：用于月度趋势图的月份字段
 
-### Fields Needed In `开票明细统一表`
+### `开票明细统一表` 需要的字段
 
-Required or already present:
+已有或应保留字段：
 
 - `关联项目`
 - `项目编号`
@@ -174,20 +204,27 @@ Required or already present:
 - `匹配状态`
 - `抵消状态`
 
-Add or verify:
+需要新增或确认的字段：
 
-- `立项公司`: lookup from `关联项目`
-- `当前项目负责人`: lookup from `关联项目`
-- `开票月份`: formula/date bucket
-- `回款月份`: formula/date bucket
-- `有效开票金额`: formula, zero when not included
-- `有效收款金额`: formula, zero when not included
+- `立项公司`：从 `关联项目` 查找引用
+- `当前项目负责人`：从 `关联项目` 查找引用
+- `开票月份`：用于月度趋势图的月份字段
+- `回款月份`：用于月度趋势图的月份字段
+- `有效开票金额`：公式字段，未纳入统计时为 0
+- `有效收款金额`：公式字段，未纳入统计时为 0
 
-### Optional Monthly Summary Table
+### 是否需要月度趋势汇总表
 
-Preferred first attempt: use dashboard chart grouping by month directly from `项目开票计划表` and `开票明细统一表`.
+优先尝试直接用仪表盘按月份分组：
 
-If Feishu chart configuration cannot produce the four-line monthly trend cleanly, add `老板驾驶舱_月度趋势表` maintained by Feishu automation:
+- 从 `项目开票计划表` 统计每月计划开票金额
+- 从 `开票明细统一表` 统计每月实际开票金额
+- 从 `开票明细统一表` 统计每月实际回款金额
+- 从 `开票明细统一表` 或项目层汇总字段统计未收款余额
+
+如果飞书仪表盘无法把四条线稳定放在同一个月度趋势图里，再新增 `老板驾驶舱_月度趋势表`。
+
+`老板驾驶舱_月度趋势表` 字段建议：
 
 - `月份`
 - `立项公司`
@@ -197,81 +234,87 @@ If Feishu chart configuration cannot produce the four-line monthly trend cleanly
 - `实际回款金额`
 - `未收款余额`
 
-## Automation Strategy
+这张表如果需要，应由飞书自动化流程维护，不由本地脚本维护。
 
-### No Local Script For Dashboard Refresh
+## 自动化策略
 
-Dashboard cards, charts, and lists should bind directly to Feishu tables and views. When underlying table records or formulas change, the dashboard reflects the current table state through Feishu.
+### 不再用本地脚本刷新驾驶舱
 
-### Feishu Automation
+老板驾驶舱的指标卡、图表、清单应直接绑定飞书表和视图。
 
-Use Feishu automation only where records need to be copied or summarized:
+当底层表记录、公式、查找引用字段发生变化时，驾驶舱通过飞书自身能力刷新。
 
-- Source invoice tables -> `开票明细统一表`
-- Approved establishment invoice plan rows -> `项目开票计划表`
-- Optional monthly trend summary -> `老板驾驶舱_月度趋势表`
+### 飞书自动化流程的用途
 
-### Manual UI Work Still Required
+飞书自动化流程只用于确实需要自动复制或汇总记录的地方：
 
-Current available MCP tools can create Bitable tables, fields, records, and views. They do not expose a dashboard-component editing API. Therefore the dashboard layout and components should be rebuilt manually in Feishu UI using the spec:
+- 三张 `源_开票明细` 自动进入 `开票明细统一表`
+- 审批通过的 `源_立项申请` 开票计划自动进入 `项目开票计划表`
+- 如飞书仪表盘无法直接完成月度四线趋势，再由飞书自动化维护 `老板驾驶舱_月度趋势表`
 
-- Add cards
-- Add line chart
-- Add table components
-- Add slicer/company filter
-- Bind each component to the specified source view/table
+### 仍需要人工在飞书界面配置的部分
 
-## Recommended Dashboard Components
+当前可用工具能创建多维表格的数据表、字段、记录和视图，但没有直接编辑飞书仪表盘组件的接口。
 
-### Cards
+因此老板驾驶舱页面本身需要在飞书界面中手动重建：
 
-- Total project count
-- Lead project count
-- Invoiced amount
-- Received amount
-- Unpaid amount
-- Risk project count
-- Next 7 days expected invoice
-- Next 7 days expected payment
-- Next month expected invoice
-- Next month expected payment
+- 添加指标卡
+- 添加折线图
+- 添加表格组件
+- 添加公司筛选器或切片器
+- 把每个组件绑定到指定的数据表或视图
 
-### Charts
+## 推荐组件清单
 
-- Monthly line chart: planned invoice vs actual invoice vs actual payment vs unpaid balance
-- Project classification structure: operating vs pass-through vs overdue/risk
+### 指标卡
 
-### Tables
+- 总项目数
+- 线索项目数
+- 已开票金额
+- 已收款金额
+- 未收款金额
+- 风险项目数
+- 未来7天预计开票
+- 未来7天预计回款
+- 下月预计开票
+- 下月预计回款
 
-- Overdue invoice projects
-- Overdue payment projects
-- Top unpaid projects
-- Lead project list
-- Data confidence exceptions
+### 图表
 
-## Implementation Sequence
+- 月度趋势折线图：计划开票、实际开票、实际回款、未收款余额
+- 项目结构图：经营项目、走账项目、线索项目、逾期项目
 
-1. Verify all needed fields exist or can be created as formulas/lookups.
-2. Build Feishu views for each dashboard component.
-3. Rebuild the dashboard manually from those views.
-4. Configure global company slicer/filter.
-5. Configure Feishu automation for source-to-target updates.
-6. Hide or retire script-generated `老板驾驶舱关键数据表` after the pure Feishu dashboard is verified.
-7. Keep `verify:invoice` as an optional audit command only, not as a dashboard refresh step.
+### 表格清单
 
-## Open Decisions
+- 逾期开票项目清单
+- 逾期回款项目清单
+- 高额未收款项目
+- 线索项目清单
+- 数据可信度检查
 
-- Whether the monthly line chart can be built directly from source tables or needs `老板驾驶舱_月度趋势表`.
-- Which lead field represents expected lead amount in `项目线索表`.
-- Which lead field represents follow-up due date and overdue status.
-- Whether `下周` should be a first-screen card or only a filter/detail view.
+## 实施顺序
 
-## Acceptance Criteria
+1. 确认所需字段是否已存在，缺失的字段优先用公式或查找引用补齐。
+2. 为每个驾驶舱组件建立对应视图。
+3. 在飞书仪表盘中手动重建老板驾驶舱组件。
+4. 配置全局公司筛选器，确保所有组件都跟随公司筛选变化。
+5. 配置飞书自动化流程，让源数据自动进入目标业务表。
+6. 纯飞书驾驶舱验证通过后，隐藏或停用脚本生成的 `老板驾驶舱关键数据表`。
+7. 保留 `verify:invoice` 作为可选审计命令，但不再作为驾驶舱刷新步骤。
 
-- Changing `项目总览表.项目分类管理` automatically changes dashboard grouping without running local scripts.
-- Company filter affects every dashboard card, chart, and list.
-- Administrative/internal projects do not appear in dashboard totals.
-- Dashboard shows operating projects, pass-through projects, total projects, lead projects, overdue invoice projects, and overdue payment projects.
-- Dashboard includes monthly trend for planned invoice, actual invoice, actual payment, and unpaid balance.
-- Overdue invoice and overdue payment lists show project, company, owner, date, overdue days, and amount.
-- Dashboard can be used without running `npm run sync:invoice`.
+## 待确认问题
+
+- 月度折线图能否直接用飞书仪表盘多数据源完成，还是需要新增 `老板驾驶舱_月度趋势表`。
+- `项目线索表` 中哪个字段代表线索预计金额。
+- `项目线索表` 中哪个字段代表跟进截止日期和是否逾期。
+- `下周预计开票/回款` 是否需要放到第一屏指标卡，还是只作为筛选视图或明细表。
+
+## 验收标准
+
+- 修改 `项目总览表.项目分类管理` 后，不运行本地脚本，驾驶舱分组也能自动变化。
+- 公司筛选能影响所有指标卡、图表和清单。
+- 行政/内部项目不进入老板驾驶舱总计。
+- 驾驶舱能同时展示总项目、经营项目、走账项目、线索项目、逾期开票项目、逾期回款项目。
+- 驾驶舱包含月度趋势：计划开票、实际开票、实际回款、未收款余额。
+- 逾期开票和逾期回款清单能展示项目、公司、负责人、日期、逾期天数和金额。
+- 不运行 `npm run sync:invoice`，老板驾驶舱仍可通过飞书自身数据联动使用。
