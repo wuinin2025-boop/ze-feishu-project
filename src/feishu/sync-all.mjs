@@ -43,22 +43,9 @@ export const STEPS = [
     default: false,
   },
   {
-    id: 'permissions',
-    label: '同步人员权限',
-    description: '按人员身份、项目负责人、项目成员和负责人交接表刷新飞书高级权限。',
-    command: [NODE, ['src/feishu/sync-permissions.mjs']],
-  },
-  {
-    id: 'verify-permissions',
-    label: '检查人员权限',
-    description: '检查管理员、项目负责人、普通员工的关键权限是否符合当前脚本。',
-    command: [NODE, ['src/feishu/verify-permissions.mjs']],
-    verify: true,
-  },
-  {
     id: 'views',
     label: '整理日常视图',
-    description: '隐藏同步字段和权限辅助字段，让日常填写界面简单一点。',
+    description: '隐藏同步字段和辅助字段，让日常填写界面简单一点。',
     command: [NODE, ['src/feishu/sync-views.mjs']],
   },
 ];
@@ -99,6 +86,8 @@ function printStepList() {
   console.log('npm run sync:all -- --dry-run');
   console.log('npm run sync:all -- --only=invoice,project-status');
   console.log('npm run sync:all -- --only=boss-dashboard');
+  console.log('');
+  console.log('说明：人员协作者和角色成员已改为飞书高级权限手动维护，本脚本不再同步人员权限。');
 }
 
 function runStep(step, { dryRun }) {

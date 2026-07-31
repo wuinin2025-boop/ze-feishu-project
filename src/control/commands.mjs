@@ -7,7 +7,7 @@ const ACTIONS = {
   },
   'sync-all': {
     label: '一键同步全部',
-    description: '同步默认流程：开票、校验、项目状态、权限、视图。不生成独立逾期回款明细表。',
+    description: '同步默认流程：开票、校验、项目状态、视图。不生成独立逾期回款明细表。',
     command: ['sync:all'],
     danger: true,
   },
@@ -15,12 +15,6 @@ const ACTIONS = {
     label: '只同步开票回款',
     description: '同步开票回款，并检查开票数据。',
     command: ['sync:all', '--', '--only=invoice,verify-invoice'],
-    danger: true,
-  },
-  permissions: {
-    label: '只同步人员权限',
-    description: '同步人员权限，并检查关键权限。',
-    command: ['sync:all', '--', '--only=permissions,verify-permissions'],
     danger: true,
   },
   views: {

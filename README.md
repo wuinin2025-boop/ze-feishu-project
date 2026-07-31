@@ -45,6 +45,8 @@ To run the local business sync control flow:
 npm run sync:all
 ```
 
+People collaborators, role members, and fine-grained permissions are maintained manually in Feishu advanced permissions. This repository no longer syncs or verifies role membership from system personnel tables.
+
 To open the local clickable control page:
 
 ```bash
@@ -67,6 +69,7 @@ Prerequisites:
 
 - Never write to tables whose name starts with `源_`.
 - Do not run old `feishu-xmxt0716` receivable sync scripts.
+- Do not run old permission automation scripts; Feishu advanced permissions are the source of truth for collaborators and role members.
 - Build and validate `项目开票进度表_试运行` before production cutover.
 - Keep old Feishu tables untouched until trial data is approved.
 

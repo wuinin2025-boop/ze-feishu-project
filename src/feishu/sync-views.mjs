@@ -28,26 +28,6 @@ const INVOICE_OVERDUE_VISIBLE_FIELDS = [
 ];
 
 const TABLES = {
-  managerChanges: {
-    tableId: 'tblqjuBHdOjt3yWi',
-    tableName: '系统_负责人变更记录表',
-    views: [
-      {
-        viewName: '全部记录',
-        hiddenFields: [
-          '项目编号',
-          '父记录',
-        ],
-      },
-      {
-        viewName: '全部负责人变更',
-        hiddenFields: [
-          '项目编号',
-          '父记录',
-        ],
-      },
-    ],
-  },
   tasks: {
     tableId: 'tblMqbOebPtzjEdH',
     tableName: '项目进度表',

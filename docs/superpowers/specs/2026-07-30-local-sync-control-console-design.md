@@ -7,7 +7,8 @@ Create a local clickable control page for Feishu sync operations and stop treati
 ## Decisions
 
 - Add a local-only HTTP console at `http://localhost:3000`, started by `npm run control`.
-- The console will expose buttons for dry run, full sync, invoice sync, permissions sync, views sync, and listing available steps.
+- The console will expose buttons for dry run, full sync, invoice sync, views sync, and listing available steps.
+- Personnel collaborators, role members, and fine-grained permissions are maintained manually in Feishu advanced permissions; the console must not expose permission sync actions.
 - The console will run the existing `sync:all` script so command-line and browser behavior stay aligned.
 - The default `sync:all` flow will exclude `boss-dashboard`; the old script remains available for explicit use only.
 - `sync:views` will organize `项目开票进度表` views so `开票逾期` and `回款逾期` are visible through the main progress table instead of a separate overdue receivables table.
