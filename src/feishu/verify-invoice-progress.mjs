@@ -34,6 +34,22 @@ const SOURCE_INVOICE_FIELDS = [
   'SourceID',
 ];
 
+const PROJECT_OVERVIEW_VERIFY_FIELDS = [
+  '项目编号',
+  '项目分类管理',
+];
+
+const BOSS_DASHBOARD_FIELDS = [
+  '驾驶舱模块',
+  '项目分类',
+  '项目数量',
+  '开票基准金额',
+  '已开票金额',
+  '开票完成率',
+  '已收款金额',
+  '回款完成率',
+];
+
 async function listTables(client) {
   const items = [];
   let pageToken;
@@ -104,6 +120,7 @@ function markdown(report, samples) {
 - 验证结果：${report.pass ? '通过' : '未通过'}
 - 项目开票计划表记录数：${report.counts.invoice_plan}
 - 开票明细统一表记录数：${report.counts.invoice_detail}
+- 老板驾驶舱关键数据表记录数：${report.counts.boss_dashboard}
 - 旧项目补录记录数（只读检查）：${report.counts.old_project_plan}
 - 源发票记录数：${report.counts.source_invoices}
 - 统一明细纳入统计开票金额：${report.amounts.detail_included_invoice}
@@ -153,13 +170,18 @@ try {
 
   const planTableId = tableIds.get(TARGET_TABLE_NAMES.invoicePlan);
   const detailTableId = tableIds.get(TARGET_TABLE_NAMES.invoiceDetail);
+  const bossDashboardTableId = tableIds.get(TARGET_TABLE_NAMES.bossDashboard);
+  const projectOverviewTableId = tableIds.get(TARGET_TABLE_NAMES.projectOverview);
   const oldPlanTableId = tableIds.get(TARGET_TABLE_NAMES.oldProjectPlan);
   check('项目开票计划表存在', Boolean(planTableId), planTableId || 'missing');
   check('开票明细统一表存在', Boolean(detailTableId), detailTableId || 'missing');
+  check('老板驾驶舱关键数据表存在', Boolean(bossDashboardTableId), bossDashboardTableId || 'missing');
 
-  const [planRows, detailRows, oldPlanRows, sourceInvoices] = await Promise.all([
+  const [planRows, detailRows, bossDashboardRows, projectOverviewRows, oldPlanRows, sourceInvoices] = await Promise.all([
     planTableId ? searchAll(client, APP_TOKEN, planTableId) : [],
     detailTableId ? searchAll(client, APP_TOKEN, detailTableId) : [],
+    bossDashboardTableId ? searchAll(client, APP_TOKEN, bossDashboardTableId, BOSS_DASHBOARD_FIELDS) : [],
+    projectOverviewTableId ? searchAll(client, APP_TOKEN, projectOverviewTableId, PROJECT_OVERVIEW_VERIFY_FIELDS) : [],
     oldPlanTableId ? searchAll(client, APP_TOKEN, oldPlanTableId, ['记录标识']) : [],
     Promise.all(SOURCE_TABLES.invoices.map((source) => searchAll(client, APP_TOKEN, source.id, SOURCE_INVOICE_FIELDS)
       .then((records) => records.map((record) => normalizeSourceInvoice(source, record))))).then((groups) => groups.flat()),
@@ -186,6 +208,22 @@ try {
   const hankookRows = detailRows.filter((row) => textValue(row.fields?.['客户名称']) === 'Hankook & Company Co., Ltd');
   const badHankookRows = hankookRows.filter((row) => textValue(row.fields?.['发票编号显示值']) !== 'Hankook 001');
   const amountExceptionRows = planRows.filter((row) => textValue(row.fields?.['匹配状态']) === '金额异常待确认');
+  const projectCountsByCategory = new Map();
+  for (const row of projectOverviewRows) {
+    const category = textValue(row.fields?.['项目分类管理']) || '未分类';
+    projectCountsByCategory.set(category, (projectCountsByCategory.get(category) || 0) + 1);
+  }
+  const bossRowsByModule = new Map(bossDashboardRows.map((row) => [textValue(row.fields?.['驾驶舱模块']), row]));
+  const operatingDashboardRow = bossRowsByModule.get('经营项目总览');
+  const passThroughDashboardRow = bossRowsByModule.get('走账项目总览');
+  const invalidBossModules = bossDashboardRows.filter((row) => !['经营项目总览', '走账项目总览'].includes(textValue(row.fields?.['驾驶舱模块'])));
+  const badCompletionRows = bossDashboardRows.filter((row) => {
+    const baseAmount = numberValue(row.fields?.['开票基准金额']) || 0;
+    const invoiceAmount = numberValue(row.fields?.['已开票金额']) || 0;
+    const invoiceRate = numberValue(row.fields?.['开票完成率']) || 0;
+    const paymentRate = numberValue(row.fields?.['回款完成率']) || 0;
+    return invoiceAmount - baseAmount > 0.01 || invoiceRate > 1.0001 || paymentRate > 1.0001;
+  });
 
   check('计划唯一键不为空', blankPlanKeys.length === 0, `blank=${blankPlanKeys.length}`);
   check('明细唯一键不为空', blankDetailKeys.length === 0, `blank=${blankDetailKeys.length}`);
@@ -195,12 +233,17 @@ try {
   check('统一明细收款金额等于源发票抵消后金额', Math.abs(detailIncludedReceived - sourceIncludedReceived) < 0.01, `detail=${detailIncludedReceived}, source=${sourceIncludedReceived}`);
   check('行政/内部项目不进入老板驾驶舱经营或走账分组', adminInDashboardRows.length === 0, `rows=${adminInDashboardRows.length}`);
   check('Hankook 空发票号使用默认显示值', badHankookRows.length === 0, `bad=${badHankookRows.length}, hankook=${hankookRows.length}`);
+  check('老板驾驶舱只有经营项目总览和走账项目总览', bossDashboardRows.length === 2 && invalidBossModules.length === 0, `rows=${bossDashboardRows.length}, invalid=${invalidBossModules.length}`);
+  check('经营项目总览项目数匹配项目分类', Number(numberValue(operatingDashboardRow?.fields?.['项目数量']) || 0) === Number(projectCountsByCategory.get('经营项目') || 0), `dashboard=${numberValue(operatingDashboardRow?.fields?.['项目数量']) || 0}, overview=${projectCountsByCategory.get('经营项目') || 0}`);
+  check('走账项目总览项目数匹配项目分类', Number(numberValue(passThroughDashboardRow?.fields?.['项目数量']) || 0) === Number(projectCountsByCategory.get('走账项目') || 0), `dashboard=${numberValue(passThroughDashboardRow?.fields?.['项目数量']) || 0}, overview=${projectCountsByCategory.get('走账项目') || 0}`);
+  check('老板驾驶舱完成率不超过100%', badCompletionRows.length === 0, `rows=${badCompletionRows.length}`);
 
   const report = {
     pass: failures.length === 0,
     counts: {
       invoice_plan: planRows.length,
       invoice_detail: detailRows.length,
+      boss_dashboard: bossDashboardRows.length,
       old_project_plan: oldPlanRows.length,
       source_invoices: sourceInvoices.length,
       amount_exception_plan_rows: amountExceptionRows.length,

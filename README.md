@@ -52,8 +52,16 @@ The second-stage invoice model uses:
 - `项目总览表.项目分类管理`: manual source of truth for project classification. Values are `经营项目`, `行政/内部项目`, and `走账项目`.
 - `项目开票计划表`: generated from approved `源_立项申请` invoice plan rows for new projects. Plan key is `项目编号-计划期次`.
 - `开票明细统一表`: generated from the three `源_开票明细` tables. Invoice key uses source body plus invoice number; Hankook blank invoice numbers display as `Hankook 001`.
+- `老板驾驶舱关键数据表`: generated summary table with two rows, `经营项目总览` and `走账项目总览`.
 
 Classification is carried into the new invoice tables through `关联项目` and formula fields. Do not make scripts write project classification or boss-dashboard grouping as manual values.
+
+If `项目总览表.项目分类管理` changes, Feishu formula fields update automatically in linked tables. The two-row boss dashboard summary and project overview financial totals are refreshed when running:
+
+```bash
+npm run sync:invoice
+npm run verify:invoice
+```
 
 Current matching rules:
 
@@ -82,6 +90,7 @@ Prerequisites:
 
 - `项目开票计划表`
 - `开票明细统一表`
+- `老板驾驶舱关键数据表`
 - `（旧项目）开票计划补录表`
 
 Daily operating views:
@@ -94,6 +103,8 @@ Daily operating views:
 - `项目开票计划表` -> `回款逾期`
 - `开票明细统一表` -> `待匹配发票`
 - `开票明细统一表` -> `红冲待确认`
+- `老板驾驶舱关键数据表` -> `经营项目总览`
+- `老板驾驶舱关键数据表` -> `走账项目总览`
 
 Latest validation report:
 

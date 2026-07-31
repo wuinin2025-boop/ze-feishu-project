@@ -3,6 +3,7 @@ import { CUTOFF_APPLICATION_NO, EXCLUDED_TEST_APPLICATION_NOS } from '../config.
 const DAY_MS = 86400000;
 const HANKOOK_CUSTOMER_NAME = 'Hankook & Company Co., Ltd';
 const HANKOOK_DISPLAY_INVOICE_NO = 'Hankook 001';
+const THIRTY_DAYS_MS = DAY_MS * 30;
 
 export function classifyApplication(applicationNo) {
   const value = String(applicationNo || '').trim();
@@ -53,6 +54,11 @@ export function classifyBossDashboardGroup(category) {
 
 export function isIncludedInBossDashboard(category) {
   return ['经营项目', '走账项目'].includes(String(category || '').trim());
+}
+
+export function bossDashboardModuleForCategory(category) {
+  const group = classifyBossDashboardGroup(category);
+  return ['经营项目总览', '走账项目总览'].includes(group) ? group : '';
 }
 
 export function normalizeInvoiceNo({ customerName, invoiceNo }) {
@@ -340,4 +346,221 @@ export function matchInvoicesToPlans(plans, invoices, { today = Date.now() } = {
       linkedPlanRecordId: invoice.linkedPlanKey ? planByKey.get(invoice.linkedPlanKey)?.recordId : undefined,
     })),
   };
+}
+
+function roundCurrency(value) {
+  return Number((Number(value || 0)).toFixed(2));
+}
+
+function ratio(numerator, denominator) {
+  const bottom = Number(denominator || 0);
+  if (!bottom) return 0;
+  return Number((Number(numerator || 0) / bottom).toFixed(4));
+}
+
+function earliestDate(values) {
+  return values.filter(Boolean).sort((left, right) => left - right)[0];
+}
+
+function addInvoiceAgg(map, invoice) {
+  if (!invoice.projectNo || !invoice.includedInStats) return;
+  const agg = map.get(invoice.projectNo) || {
+    invoiceAmount: 0,
+    receivedAmount: 0,
+    invoiceCount: 0,
+  };
+  agg.invoiceAmount += Number(invoice.invoiceAmount || 0);
+  agg.receivedAmount += Number(invoice.receivedAmount || 0);
+  agg.invoiceCount += 1;
+  map.set(invoice.projectNo, agg);
+}
+
+function addPlanAgg(map, plan, today) {
+  if (!plan.projectNo) return;
+  const agg = map.get(plan.projectNo) || {
+    planCount: 0,
+    planAmount: 0,
+    nextPlans: [],
+    nextPayments: [],
+    invoiceOverdueAmount: 0,
+    paymentOverdueAmount: 0,
+    amountExceptionCount: 0,
+    future30PlanAmount: 0,
+  };
+  const planAmount = Number(plan.planAmount || 0);
+  agg.planCount += 1;
+  agg.planAmount += planAmount;
+  if ((plan.actualInvoiceAmount || 0) < planAmount - 0.01) {
+    agg.nextPlans.push({ date: plan.planDate, amount: planAmount });
+    if (plan.planDate && plan.planDate >= today && plan.planDate <= today + THIRTY_DAYS_MS) {
+      agg.future30PlanAmount += Math.max(planAmount - Number(plan.actualInvoiceAmount || 0), 0);
+    }
+  }
+  if ((plan.receivedAmount || 0) < (plan.actualInvoiceAmount || 0) - 0.01) {
+    agg.nextPayments.push(plan.expectedPaymentDate);
+  }
+  if (plan.invoiceStatus === '开票逾期') agg.invoiceOverdueAmount += Number(plan.uninvoicedAmount || 0);
+  if (plan.paymentStatus === '回款逾期') agg.paymentOverdueAmount += Number(plan.unpaidAmount || 0);
+  if (plan.matchStatus === '金额异常待确认' || plan.diffStatus === '金额异常待确认') agg.amountExceptionCount += 1;
+  map.set(plan.projectNo, agg);
+}
+
+function projectInvoiceStatus({ plannedAmount, invoiceAmount }) {
+  if (plannedAmount > 0 && invoiceAmount >= plannedAmount - 0.01) return '已全部开票';
+  if (invoiceAmount > 0) return '部分开票';
+  return '未开票';
+}
+
+function projectPaymentStatus({ invoiceAmount, receivedAmount }) {
+  if (invoiceAmount > 0 && receivedAmount >= invoiceAmount - 0.01) return '已收齐';
+  if (receivedAmount > 0) return '部分收款';
+  return '未收款';
+}
+
+function warningStatus({ overdueAmount, nextDate, today }) {
+  if (Number(overdueAmount || 0) > 0) return '逾期';
+  if (nextDate && nextDate >= today && nextDate <= today + 7 * DAY_MS) return '即将到期';
+  return '正常';
+}
+
+export function buildProjectOverviewMetricRows({ projects, plans, invoices, today = Date.now() }) {
+  const invoiceByProject = new Map();
+  const planByProject = new Map();
+  for (const invoice of invoices) addInvoiceAgg(invoiceByProject, invoice);
+  for (const plan of plans) addPlanAgg(planByProject, plan, today);
+
+  return projects.flatMap((project) => {
+    const invoiceAgg = invoiceByProject.get(project.projectNo);
+    const planAgg = planByProject.get(project.projectNo);
+    if (!invoiceAgg && !planAgg) return [];
+
+    const invoiceAmount = roundCurrency(invoiceAgg?.invoiceAmount);
+    const receivedAmount = roundCurrency(invoiceAgg?.receivedAmount);
+    const planAmount = roundCurrency(planAgg?.planAmount);
+    const nextPlan = (planAgg?.nextPlans || [])
+      .filter((item) => item.date)
+      .sort((left, right) => left.date - right.date)[0];
+    const nextPaymentDate = earliestDate(planAgg?.nextPayments || []);
+    const invoiceOverdueAmount = roundCurrency(planAgg?.invoiceOverdueAmount);
+    const paymentOverdueAmount = roundCurrency(planAgg?.paymentOverdueAmount);
+
+    return [{
+      recordId: project.recordId,
+      projectNo: project.projectNo,
+      fields: {
+        '最后同步时间': today,
+        ...(invoiceAgg ? {
+          '已开票金额': invoiceAmount,
+          '已收款金额': receivedAmount,
+        } : {}),
+        ...(planAgg ? {
+          '预计开票总次数': planAgg.planCount,
+          '计划开票总金额': planAmount,
+          '下一计划开票日期': nextPlan?.date,
+          '下一计划开票金额': nextPlan?.amount,
+          '下一预计回款日期': nextPaymentDate,
+          '逾期开票金额': invoiceOverdueAmount,
+          '逾期回款金额': paymentOverdueAmount,
+          '开票状态': projectInvoiceStatus({ plannedAmount: planAmount, invoiceAmount }),
+          '客户收款状态': projectPaymentStatus({ invoiceAmount, receivedAmount }),
+          '开票计划预警': warningStatus({ overdueAmount: invoiceOverdueAmount, nextDate: nextPlan?.date, today }),
+          '回款计划预警': warningStatus({ overdueAmount: paymentOverdueAmount, nextDate: nextPaymentDate, today }),
+        } : {}),
+      },
+    }];
+  });
+}
+
+export function buildBossDashboardRows({ projects, plans, invoices, today = Date.now() }) {
+  const invoiceByProject = new Map();
+  const planByProject = new Map();
+  for (const invoice of invoices) addInvoiceAgg(invoiceByProject, invoice);
+  for (const plan of plans) addPlanAgg(planByProject, plan, today);
+
+  const rowsByModule = new Map([
+    ['经营项目总览', { module: '经营项目总览', category: '经营项目' }],
+    ['走账项目总览', { module: '走账项目总览', category: '走账项目' }],
+  ]);
+
+  for (const base of rowsByModule.values()) {
+    Object.assign(base, {
+      projectCount: 0,
+      establishmentAmount: 0,
+      settlementAmount: 0,
+      planAmount: 0,
+      invoiceBaseAmount: 0,
+      invoiceAmount: 0,
+      receivedAmount: 0,
+      uninvoicedAmount: 0,
+      unpaidAmount: 0,
+      invoiceOverdueAmount: 0,
+      paymentOverdueAmount: 0,
+      invoiceOverdueProjectCount: 0,
+      paymentOverdueProjectCount: 0,
+      amountExceptionProjectCount: 0,
+      future30PlanAmount: 0,
+      nextPlanDates: [],
+      nextPaymentDates: [],
+    });
+  }
+
+  for (const project of projects) {
+    const module = bossDashboardModuleForCategory(project.projectCategory);
+    if (!module) continue;
+    const row = rowsByModule.get(module);
+    const invoiceAgg = invoiceByProject.get(project.projectNo) || {};
+    const planAgg = planByProject.get(project.projectNo) || {};
+    const invoiceAmount = Number(invoiceAgg.invoiceAmount ?? project.invoicedAmount ?? 0);
+    const receivedAmount = Number(invoiceAgg.receivedAmount ?? project.receivedAmount ?? 0);
+    const planAmount = Number(planAgg.planAmount ?? project.planInvoiceAmount ?? 0);
+    const invoiceBaseAmount = Math.max(planAmount, Number(project.settlementAmount || 0), invoiceAmount);
+    const invoiceOverdueAmount = Number(planAgg.invoiceOverdueAmount ?? project.overdueInvoiceAmount ?? 0);
+    const paymentOverdueAmount = Number(planAgg.paymentOverdueAmount ?? project.overduePaymentAmount ?? 0);
+
+    row.projectCount += 1;
+    row.establishmentAmount += Number(project.establishmentAmount || 0);
+    row.settlementAmount += Number(project.settlementAmount || 0);
+    row.planAmount += planAmount;
+    row.invoiceBaseAmount += invoiceBaseAmount;
+    row.invoiceAmount += invoiceAmount;
+    row.receivedAmount += receivedAmount;
+    row.uninvoicedAmount += Math.max(invoiceBaseAmount - invoiceAmount, 0);
+    row.unpaidAmount += Math.max(invoiceAmount - receivedAmount, 0);
+    row.invoiceOverdueAmount += invoiceOverdueAmount;
+    row.paymentOverdueAmount += paymentOverdueAmount;
+    row.future30PlanAmount += Number(planAgg.future30PlanAmount || 0);
+    row.amountExceptionProjectCount += Number(planAgg.amountExceptionCount || 0) > 0 ? 1 : 0;
+    if (invoiceOverdueAmount > 0) row.invoiceOverdueProjectCount += 1;
+    if (paymentOverdueAmount > 0) row.paymentOverdueProjectCount += 1;
+    row.nextPlanDates.push(...(planAgg.nextPlans || []).map((item) => item.date));
+    row.nextPaymentDates.push(...(planAgg.nextPayments || []));
+  }
+
+  return [...rowsByModule.values()].map((row) => ({
+    module: row.module,
+    fields: {
+      '驾驶舱模块': row.module,
+      '项目分类': row.category,
+      '项目数量': row.projectCount,
+      '立项金额': roundCurrency(row.establishmentAmount),
+      '结算金额': roundCurrency(row.settlementAmount),
+      '计划开票金额': roundCurrency(row.planAmount),
+      '开票基准金额': roundCurrency(row.invoiceBaseAmount),
+      '已开票金额': roundCurrency(row.invoiceAmount),
+      '未开票金额': roundCurrency(row.uninvoicedAmount),
+      '开票完成率': ratio(row.invoiceAmount, row.invoiceBaseAmount),
+      '已收款金额': roundCurrency(row.receivedAmount),
+      '未收款金额': roundCurrency(row.unpaidAmount),
+      '回款完成率': ratio(row.receivedAmount, row.invoiceAmount),
+      '逾期开票金额': roundCurrency(row.invoiceOverdueAmount),
+      '逾期回款金额': roundCurrency(row.paymentOverdueAmount),
+      '开票逾期项目数': row.invoiceOverdueProjectCount,
+      '回款逾期项目数': row.paymentOverdueProjectCount,
+      '金额异常项目数': row.amountExceptionProjectCount,
+      '未来30天计划开票金额': roundCurrency(row.future30PlanAmount),
+      '下一计划开票日期': earliestDate(row.nextPlanDates),
+      '下一预计回款日期': earliestDate(row.nextPaymentDates),
+      '最后同步时间': today,
+    },
+  }));
 }

@@ -15,6 +15,7 @@ export const TARGET_TABLE_NAMES = {
   projectOverview: '项目总览表',
   invoicePlan: '项目开票计划表',
   invoiceDetail: '开票明细统一表',
+  bossDashboard: '老板驾驶舱关键数据表',
   oldProjectPlan: '（旧项目）开票计划补录表',
 };
 

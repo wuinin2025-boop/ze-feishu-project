@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 import {
   buildInvoiceCollectionTitle,
   buildInvoiceDetailKey,
+  buildBossDashboardRows,
   buildOldProjectNodes,
   buildPlanUniqueKey,
+  buildProjectOverviewMetricRows,
   buildProgressKey,
   classifyBossDashboardGroup,
   buildSplitInvoiceNodes,
@@ -158,4 +160,83 @@ test('offset invoices are excluded before matching', () => {
 
   assert.deepEqual(result.plans.map((plan) => plan.actualInvoiceAmount), [0]);
   assert.deepEqual(result.invoices.map((invoice) => invoice.matchStatus), ['已抵消', '已抵消']);
+});
+
+test('project overview metric rows refresh invoice and plan fields only for touched projects', () => {
+  const today = Date.UTC(2026, 6, 31);
+  const rows = buildProjectOverviewMetricRows({
+    today,
+    projects: [
+      { recordId: 'rec1', projectNo: 'P1', projectCategory: '经营项目' },
+      { recordId: 'rec2', projectNo: 'P2', projectCategory: '走账项目' },
+    ],
+    invoices: [
+      { projectNo: 'P1', includedInStats: true, invoiceAmount: 600, receivedAmount: 100 },
+    ],
+    plans: [
+      {
+        projectNo: 'P1',
+        planAmount: 1000,
+        planDate: Date.UTC(2026, 6, 1),
+        expectedPaymentDate: Date.UTC(2026, 6, 20),
+        actualInvoiceAmount: 600,
+        receivedAmount: 100,
+        uninvoicedAmount: 400,
+        unpaidAmount: 500,
+        invoiceStatus: '开票逾期',
+        paymentStatus: '回款逾期',
+      },
+    ],
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].recordId, 'rec1');
+  assert.equal(rows[0].fields['已开票金额'], 600);
+  assert.equal(rows[0].fields['已收款金额'], 100);
+  assert.equal(rows[0].fields['逾期开票金额'], 400);
+  assert.equal(rows[0].fields['逾期回款金额'], 500);
+  assert.equal(rows[0].fields['开票状态'], '部分开票');
+  assert.equal(rows[0].fields['客户收款状态'], '部分收款');
+});
+
+test('boss dashboard rows include operating and pass-through projects but exclude admin projects', () => {
+  const today = Date.UTC(2026, 6, 31);
+  const rows = buildBossDashboardRows({
+    today,
+    projects: [
+      { projectNo: 'P1', projectCategory: '经营项目', establishmentAmount: 1000, settlementAmount: 900 },
+      { projectNo: 'P2', projectCategory: '走账项目', establishmentAmount: 300, settlementAmount: 0 },
+      { projectNo: 'P3', projectCategory: '行政/内部项目', establishmentAmount: 10000, settlementAmount: 0 },
+    ],
+    invoices: [
+      { projectNo: 'P1', includedInStats: true, invoiceAmount: 600, receivedAmount: 100 },
+      { projectNo: 'P2', includedInStats: true, invoiceAmount: 300, receivedAmount: 300 },
+      { projectNo: 'P3', includedInStats: true, invoiceAmount: 9000, receivedAmount: 9000 },
+    ],
+    plans: [
+      {
+        projectNo: 'P1',
+        planAmount: 1000,
+        planDate: Date.UTC(2026, 7, 15),
+        expectedPaymentDate: Date.UTC(2026, 7, 30),
+        actualInvoiceAmount: 600,
+        receivedAmount: 100,
+        future30PlanAmount: 400,
+        diffStatus: '金额异常待确认',
+      },
+    ],
+  });
+
+  const operating = rows.find((row) => row.module === '经营项目总览').fields;
+  const passThrough = rows.find((row) => row.module === '走账项目总览').fields;
+  assert.equal(operating['项目数量'], 1);
+  assert.equal(operating['立项金额'], 1000);
+  assert.equal(operating['开票基准金额'], 1000);
+  assert.equal(operating['已开票金额'], 600);
+  assert.equal(operating['未收款金额'], 500);
+  assert.equal(operating['金额异常项目数'], 1);
+  assert.equal(passThrough['项目数量'], 1);
+  assert.equal(passThrough['开票基准金额'], 300);
+  assert.equal(passThrough['已开票金额'], 300);
+  assert.equal(rows.reduce((sum, row) => sum + row.fields['立项金额'], 0), 1300);
 });

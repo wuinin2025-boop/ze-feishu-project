@@ -6,8 +6,10 @@ import {
   TARGET_TABLE_NAMES,
 } from '../config.mjs';
 import {
+  buildBossDashboardRows,
   buildInvoiceDetailKey,
   buildPlanUniqueKey,
+  buildProjectOverviewMetricRows,
   classifyApplication,
   matchInvoicesToPlans,
   normalizeInvoiceNo,
@@ -60,6 +62,15 @@ const PROJECT_OVERVIEW_FIELDS = [
   '项目编号',
   '项目名称',
   '项目分类管理',
+  '立项金额',
+  '结算金额',
+  '已开票金额',
+  '已收款金额',
+  '计划开票总金额',
+  '逾期开票金额',
+  '逾期回款金额',
+  '下一计划开票日期',
+  '下一预计回款日期',
 ];
 
 function assertWritableTarget(tableName) {
@@ -105,6 +116,7 @@ async function tableIdByName(client) {
     TARGET_TABLE_NAMES.projectOverview,
     TARGET_TABLE_NAMES.invoicePlan,
     TARGET_TABLE_NAMES.invoiceDetail,
+    TARGET_TABLE_NAMES.bossDashboard,
   ]) {
     if (!result.has(name)) throw new Error(`Target table not found: ${name}. Run npm run setup:invoice-model first.`);
   }
@@ -176,6 +188,15 @@ function normalizeProjectOverview(record) {
     projectNo: textValue(fields['项目编号']),
     projectName: textValue(fields['项目名称']),
     projectCategory: textValue(fields['项目分类管理']),
+    establishmentAmount: numberValue(fields['立项金额']) || 0,
+    settlementAmount: numberValue(fields['结算金额']) || 0,
+    invoicedAmount: numberValue(fields['已开票金额']) || 0,
+    receivedAmount: numberValue(fields['已收款金额']) || 0,
+    planInvoiceAmount: numberValue(fields['计划开票总金额']) || 0,
+    overdueInvoiceAmount: numberValue(fields['逾期开票金额']) || 0,
+    overduePaymentAmount: numberValue(fields['逾期回款金额']) || 0,
+    nextPlanDate: timestampValue(fields['下一计划开票日期']),
+    nextExpectedPaymentDate: timestampValue(fields['下一预计回款日期']),
   };
 }
 
@@ -361,6 +382,27 @@ function buildInvoicePlanLinkUpdates(matchedInvoices, detailRecordIdsByKey, plan
   });
 }
 
+function buildProjectOverviewUpdates(projects, matched) {
+  return buildProjectOverviewMetricRows({
+    projects,
+    plans: matched.plans,
+    invoices: matched.invoices,
+    today: NOW,
+  }).map((row) => ({
+    record_id: row.recordId,
+    fields: cleanFields(row.fields),
+  }));
+}
+
+function buildBossDashboardUpsertRows(projects, matched) {
+  return buildBossDashboardRows({
+    projects,
+    plans: matched.plans,
+    invoices: matched.invoices,
+    today: NOW,
+  }).map((row) => row.fields);
+}
+
 const client = await connectFeishu([
   'bitable.v1.appTable.list',
   'bitable.v1.appTableRecord.search',
@@ -378,10 +420,11 @@ try {
   ]);
 
   const sourcePlans = sourcePlanRows(sourceProjects.map(normalizePlanSource));
+  const projectOverviewRows = projectOverviewRecords.map(normalizeProjectOverview);
   const { plans, invoices } = attachProjects(
     sourcePlans.rows,
     invoiceSources.flat(),
-    projectOverviewRecords.map(normalizeProjectOverview),
+    projectOverviewRows,
   );
   const matched = matchInvoicesToPlans(plans, invoices, { today: NOW });
 
@@ -417,6 +460,21 @@ try {
     tableIds.get(TARGET_TABLE_NAMES.invoiceDetail),
     detailPlanLinkUpdates,
   );
+  const projectOverviewUpdates = buildProjectOverviewUpdates(projectOverviewRows, matched);
+  const projectOverviewUpdateResult = await batchUpdate(
+    client,
+    TARGET_TABLE_NAMES.projectOverview,
+    tableIds.get(TARGET_TABLE_NAMES.projectOverview),
+    projectOverviewUpdates,
+  );
+  const bossDashboardRows = buildBossDashboardUpsertRows(projectOverviewRows, matched);
+  const bossDashboardResult = await upsertByKey(
+    client,
+    TARGET_TABLE_NAMES.bossDashboard,
+    tableIds.get(TARGET_TABLE_NAMES.bossDashboard),
+    bossDashboardRows,
+    '驾驶舱模块',
+  );
 
   const report = {
     dry_run: DRY_RUN,
@@ -428,12 +486,19 @@ try {
       offset_invoice_rows: matched.invoices.filter((invoice) => invoice.offsetStatus === '已抵消').length,
       unmatched_invoice_rows: matched.invoices.filter((invoice) => ['未匹配项目', '计划外开票', '红冲待确认'].includes(invoice.matchStatus)).length,
       amount_exception_plan_rows: matched.plans.filter((plan) => plan.matchStatus === '金额异常待确认').length,
+      project_overview_updates: projectOverviewUpdates.length,
+      boss_dashboard_rows: bossDashboardRows.length,
       ...sourcePlans.stats,
     },
     upsert: {
       invoice_detail: invoiceResult,
       invoice_plan: planResult,
       invoice_detail_plan_links: linkedDetails,
+      project_overview: {
+        planned: projectOverviewUpdates.length,
+        updated: projectOverviewUpdateResult,
+      },
+      boss_dashboard: bossDashboardResult,
     },
   };
 
