@@ -46,22 +46,6 @@ export function buildInvoiceCollectionTitle(invoice) {
   return [sourceName, projectNo, identifier].filter(Boolean).join('|');
 }
 
-export function buildSyncLogTitle({ runTime, runType, result }) {
-  const date = new Date(runTime || 0);
-  const timeText = Number.isFinite(date.getTime())
-    ? date.toISOString().replace('T', ' ').slice(0, 19)
-    : '未知时间';
-  return [
-    timeText,
-    String(runType || '同步任务').trim(),
-    String(result || '待确认').trim(),
-  ].filter(Boolean).join('|');
-}
-
-export function buildSingleLinkField(recordId) {
-  return recordId ? [recordId] : undefined;
-}
-
 export function deriveOverallStatus({ invoiceStatus, paymentStatus, diffStatus }) {
   if (diffStatus === '金额异常待核对') return '金额异常待核对';
   if (paymentStatus === '回款逾期') return '回款逾期';

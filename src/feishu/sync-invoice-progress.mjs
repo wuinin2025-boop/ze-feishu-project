@@ -9,9 +9,7 @@ import {
   buildOldProjectNodes,
   buildInvoiceCollectionTitle,
   buildProgressKey,
-  buildSingleLinkField,
   buildSplitInvoiceNodes,
-  buildSyncLogTitle,
   classifyApplication,
   collapseReversedInvoices,
   deriveInvoiceStatus,
@@ -281,23 +279,6 @@ function buildInvoiceCollectionRows(invoices) {
   }));
 }
 
-function oldPlanRow(project, node) {
-  return {
-    '源记录键': `old-plan|${project.projectNo}|${node.executionPeriod}`,
-    '关联项目': buildSingleLinkField(project.projectOverviewRecordId),
-    '项目编号': project.projectNo,
-    '项目名称': project.projectName,
-    '开票总次数': node.currentPlanCount,
-    '开票期次': node.executionPeriod,
-    '计划开票日期': node.planDate,
-    '计划开票金额': node.currentPlanAmount,
-    '预计回款日期': node.expectedPaymentDate,
-    '备注': node.generationStatus,
-    '生成状态': node.generationStatus,
-    '最后同步时间': NOW,
-  };
-}
-
 function progressRow(project, node, dataSource) {
   const recordTitle = buildProgressKey({ projectNo: project.projectNo, executionPeriod: node.executionPeriod, invoiceNo: node.invoiceNo });
   const currentManagers = project.currentManagers?.length ? project.currentManagers : project.owner;
@@ -386,14 +367,12 @@ function buildRows(projects, invoices) {
     oldProjectByNo.delete(projectNo);
   }
 
-  const oldPlanRows = [];
   const progressRows = [];
 
   for (const project of oldProjectByNo.values()) {
     const projectInvoices = collapseReversedInvoices(invoiceByProject.get(project.projectNo) || []);
     const nodes = buildOldProjectNodes(project, projectInvoices);
     for (const node of nodes) {
-      oldPlanRows.push(oldPlanRow(project, node));
       progressRows.push(progressRow(project, node, '旧项目自动初始化'));
     }
   }
@@ -414,7 +393,6 @@ function buildRows(projects, invoices) {
 
   return {
     invoiceCollectionRows: buildInvoiceCollectionRows(invoices),
-    oldPlanRows,
     progressRows,
     stats: {
       approved_project_count: approvedProjects.length,
@@ -422,7 +400,7 @@ function buildRows(projects, invoices) {
       new_project_count: newPlanByProject.size,
       excluded_test_count: excludedTests.length,
       invoice_count: invoices.length,
-      old_plan_rows: oldPlanRows.length,
+      generated_old_project_nodes: progressRows.filter((row) => row['数据来源'] === '旧项目自动初始化').length,
       progress_rows: progressRows.length,
       manual_confirmation_rows: progressRows.filter((row) => ['待人工确认', '待人工补充'].includes(row['生成状态'])).length,
       split_rows: progressRows.filter((row) => row['差异状态'] === '实际拆分开票').length,
@@ -457,13 +435,6 @@ try {
     rows.invoiceCollectionRows,
     { prune: true },
   );
-  const oldPlanResult = await upsertByKey(
-    client,
-    TARGET_TABLE_NAMES.oldProjectPlan,
-    tableIds.get(TARGET_TABLE_NAMES.oldProjectPlan),
-    rows.oldPlanRows,
-    { prune: true, pruneKey: (key) => key.startsWith('old-plan|') },
-  );
   const progressResult = await upsertByKey(
     client,
     TARGET_TABLE_NAMES.invoiceProgressTrial,
@@ -477,23 +448,9 @@ try {
     stats: rows.stats,
     upsert: {
       invoice_collection: invoiceCollectionResult,
-      old_project_plan: oldPlanResult,
       invoice_progress: progressResult,
     },
   };
-
-  if (!DRY_RUN) {
-    const runType = '项目开票进度同步';
-    const result = '成功';
-    await batchCreate(client, TARGET_TABLE_NAMES.syncLog, tableIds.get(TARGET_TABLE_NAMES.syncLog), [{
-      '记录标题': buildSyncLogTitle({ runTime: NOW, runType, result }),
-      '运行时间': NOW,
-      '运行类型': runType,
-      '结果': result,
-      '摘要': `进度表 ${progressResult.created} 新增 / ${progressResult.updated} 更新`,
-      '详情JSON': JSON.stringify(report),
-    }]);
-  }
 
   console.log(JSON.stringify(report, null, 2));
 } finally {

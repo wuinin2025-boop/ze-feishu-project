@@ -5,9 +5,7 @@ import {
   buildInvoiceCollectionTitle,
   buildOldProjectNodes,
   buildProgressKey,
-  buildSingleLinkField,
   buildSplitInvoiceNodes,
-  buildSyncLogTitle,
   classifyApplication,
   collapseReversedInvoices,
   deriveInvoiceStatus,
@@ -66,13 +64,7 @@ test('progress key is stable for actual and plan-only rows', () => {
   assert.equal(buildProgressKey({ projectNo: 'P1', executionPeriod: 2 }), 'P1|2|计划');
 });
 
-test('single link field uses Feishu write format', () => {
-  assert.deepEqual(buildSingleLinkField('rec123'), ['rec123']);
-  assert.equal(buildSingleLinkField(''), undefined);
-  assert.equal(buildSingleLinkField(undefined), undefined);
-});
-
-test('invoice collection and sync log titles replace blank first fields', () => {
+test('invoice collection titles replace blank first fields', () => {
   assert.equal(
     buildInvoiceCollectionTitle({
       sourceName: '集熠开票明细',
@@ -85,10 +77,6 @@ test('invoice collection and sync log titles replace blank first fields', () => 
   assert.equal(
     buildInvoiceCollectionTitle({ sourceName: '冶堂开票明细', sourceId: 'recB' }),
     '冶堂开票明细|recB',
-  );
-  assert.equal(
-    buildSyncLogTitle({ runTime: Date.UTC(2026, 6, 30, 4, 0, 0), runType: '项目开票进度同步', result: '成功' }),
-    '2026-07-30 04:00:00|项目开票进度同步|成功',
   );
 });
 

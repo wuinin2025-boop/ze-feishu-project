@@ -14,7 +14,6 @@ cd ze-feishu-project
 npm install
 npm test
 npm run verify:invoice
-npm run sync:all -- --dry-run
 ```
 
 For a computer where the repository already exists:
@@ -33,31 +32,11 @@ npm run sync:invoice
 npm run verify:invoice
 ```
 
-To refresh the simplified daily views used by non-technical users:
-
-```bash
-npm run sync:views
-```
-
-To run the local business sync control flow:
-
-```bash
-npm run sync:all
-```
-
 People collaborators, role members, and fine-grained permissions are maintained manually in Feishu advanced permissions. This repository no longer syncs or verifies role membership from system personnel tables.
 
-To open the local clickable control page:
+Project status, daily views, overdue dashboards, sync logs, local control pages, and permission automation have been retired from the local scripts. Maintain those directly in Feishu.
 
-```bash
-npm run control
-```
-
-Keep that terminal window open, then open `http://localhost:3000`. If port 3000 is busy, run `PORT=3001 npm run control` and open `http://localhost:3001`.
-
-Chinese operating notes:
-
-- `docs/local-sync-control.md`
+`（旧项目）开票计划补录表` is currently maintained manually in Feishu. Local scripts must not create, update, prune, or restructure its records.
 
 Prerequisites:
 
@@ -70,6 +49,8 @@ Prerequisites:
 - Never write to tables whose name starts with `源_`.
 - Do not run old `feishu-xmxt0716` receivable sync scripts.
 - Do not run old permission automation scripts; Feishu advanced permissions are the source of truth for collaborators and role members.
+- Do not run old project-status, views, boss-dashboard, sync-log, or local-control automation scripts.
+- Do not let local scripts write `（旧项目）开票计划补录表`; it is under manual backfill.
 - Build and validate `项目开票进度表_试运行` before production cutover.
 - Keep old Feishu tables untouched until trial data is approved.
 
@@ -78,7 +59,6 @@ Prerequisites:
 - `项目开票进度表_试运行`
 - `开票明细归集表`
 - `（旧项目）开票计划补录表`
-- `同步日志`
 
 Daily operating views:
 

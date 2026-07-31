@@ -5,13 +5,7 @@
   "private": true,
   "scripts": {
     "test": "node --test",
-    "schema:invoice": "node src/feishu/schema.mjs",
     "sync:invoice": "node src/feishu/sync-invoice-progress.mjs",
-    "sync:boss-dashboard": "node src/feishu/sync-boss-dashboard.mjs",
-    "sync:project-status": "node src/feishu/sync-project-status.mjs",
-    "sync:views": "node src/feishu/sync-views.mjs",
-    "sync:all": "node src/feishu/sync-all.mjs",
-    "control": "node src/control/server.mjs",
     "verify:invoice": "node src/feishu/verify-invoice-progress.mjs"
   },
   "dependencies": {
