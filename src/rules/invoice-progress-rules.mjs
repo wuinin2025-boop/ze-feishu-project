@@ -1,6 +1,8 @@
 import { CUTOFF_APPLICATION_NO, EXCLUDED_TEST_APPLICATION_NOS } from '../config.mjs';
 
 const DAY_MS = 86400000;
+const HANKOOK_CUSTOMER_NAME = 'Hankook & Company Co., Ltd';
+const HANKOOK_DISPLAY_INVOICE_NO = 'Hankook 001';
 
 export function classifyApplication(applicationNo) {
   const value = String(applicationNo || '').trim();
@@ -37,10 +39,71 @@ export function buildProgressKey({ projectNo, executionPeriod, invoiceNo }) {
   return [projectNo || '未匹配项目', executionPeriod || '未定期次', invoiceNo || '计划'].join('|');
 }
 
+export function buildPlanUniqueKey({ projectNo, period }) {
+  return [projectNo || '未匹配项目', period || '未定期次'].join('-');
+}
+
+export function classifyBossDashboardGroup(category) {
+  const value = String(category || '').trim();
+  if (value === '经营项目') return '经营项目总览';
+  if (value === '走账项目') return '走账项目总览';
+  if (value === '行政/内部项目') return '不纳入';
+  return '项目分类待确认';
+}
+
+export function isIncludedInBossDashboard(category) {
+  return ['经营项目', '走账项目'].includes(String(category || '').trim());
+}
+
+export function normalizeInvoiceNo({ customerName, invoiceNo }) {
+  const rawInvoiceNo = String(invoiceNo || '').trim();
+  const normalizedCustomerName = String(customerName || '').trim();
+  const isHankook = normalizedCustomerName === HANKOOK_CUSTOMER_NAME;
+  if (rawInvoiceNo) {
+    return {
+      rawInvoiceNo,
+      displayInvoiceNo: rawInvoiceNo,
+      invoiceNoMissing: false,
+      isHankook,
+    };
+  }
+  if (isHankook) {
+    return {
+      rawInvoiceNo: '',
+      displayInvoiceNo: HANKOOK_DISPLAY_INVOICE_NO,
+      invoiceNoMissing: false,
+      isHankook: true,
+    };
+  }
+  return {
+    rawInvoiceNo: '',
+    displayInvoiceNo: '',
+    invoiceNoMissing: true,
+    isHankook: false,
+  };
+}
+
+export function buildInvoiceDetailKey(invoice) {
+  const sourceName = String(invoice?.sourceName || '').trim() || '未知来源';
+  const sourceId = String(invoice?.sourceId || '').trim();
+  const projectNo = String(invoice?.projectNo || '').trim();
+  const invoiceAmount = Number(invoice?.invoiceAmount || 0);
+  const invoiceDate = invoice?.invoiceDate || '';
+  const { displayInvoiceNo, invoiceNoMissing, isHankook } = normalizeInvoiceNo(invoice || {});
+  if (displayInvoiceNo && !isHankook) return `${sourceName}|${displayInvoiceNo}`;
+  if (isHankook) return [sourceName, projectNo || '未匹配项目', displayInvoiceNo, sourceId || invoiceDate || invoiceAmount].join('|');
+  return [sourceName, '发票编号缺失', projectNo || '未匹配项目', sourceId || invoiceDate || invoiceAmount].join('|');
+}
+
+export function deriveOverdueDays({ date, today = Date.now(), active = true }) {
+  if (!active || !date) return 0;
+  return Math.max(Math.floor((today - date) / DAY_MS), 0);
+}
+
 export function buildInvoiceCollectionTitle(invoice) {
   const sourceName = String(invoice?.sourceName || '').trim();
   const projectNo = String(invoice?.projectNo || '').trim();
-  const invoiceNo = String(invoice?.invoiceNo || '').trim();
+  const invoiceNo = normalizeInvoiceNo(invoice || {}).displayInvoiceNo;
   const sourceId = String(invoice?.sourceId || '').trim();
   const identifier = invoiceNo || sourceId || '未命名发票';
   return [sourceName, projectNo, identifier].filter(Boolean).join('|');
@@ -150,4 +213,131 @@ export function collapseReversedInvoices(invoices) {
     remaining.push({ ...invoice, __sourceIndex: index });
   }
   return remaining.map(({ __sourceIndex, ...invoice }) => invoice);
+}
+
+export function markOffsetInvoices(invoices) {
+  const rows = invoices.map((invoice, index) => ({
+    ...invoice,
+    __index: index,
+    detailKey: invoice.detailKey || buildInvoiceDetailKey(invoice),
+    offsetStatus: '未抵消',
+    includedInStats: true,
+  }));
+  const positives = [];
+
+  for (const row of rows) {
+    const amount = Number(row.invoiceAmount || 0);
+    if (amount < 0) {
+      const match = positives.find((candidate) => (
+        candidate.includedInStats
+        && candidate.projectNo === row.projectNo
+        && Math.abs(Number(candidate.invoiceAmount || 0) + amount) < 0.01
+      ));
+      row.includedInStats = false;
+      if (match) {
+        match.includedInStats = false;
+        match.offsetStatus = '已抵消';
+        match.offsetWith = row.detailKey;
+        row.offsetStatus = '已抵消';
+        row.offsetWith = match.detailKey;
+      } else {
+        row.offsetStatus = '红冲待确认';
+      }
+      continue;
+    }
+    positives.push(row);
+  }
+
+  return rows.map(({ __index, ...row }) => row);
+}
+
+export function matchInvoicesToPlans(plans, invoices, { today = Date.now() } = {}) {
+  const matchedPlans = [...plans]
+    .sort((left, right) => (Number(left.period || 0) - Number(right.period || 0)))
+    .map((plan) => ({
+      ...plan,
+      planKey: plan.planKey || buildPlanUniqueKey(plan),
+      linkedInvoiceKeys: [],
+      actualInvoiceAmount: 0,
+      receivedAmount: 0,
+      actualInvoiceDate: undefined,
+      paymentDate: undefined,
+      matchStatus: '待匹配',
+      diffStatus: '无差异',
+    }));
+
+  const planByKey = new Map(matchedPlans.map((plan) => [plan.planKey, plan]));
+  const matchedInvoices = markOffsetInvoices(invoices)
+    .sort((left, right) => (left.invoiceDate || 0) - (right.invoiceDate || 0))
+    .map((invoice) => ({ ...invoice, matchStatus: '待匹配', linkedPlanKey: '' }));
+
+  for (const invoice of matchedInvoices) {
+    if (!invoice.includedInStats) {
+      invoice.matchStatus = invoice.offsetStatus;
+      continue;
+    }
+    if (!invoice.projectNo) {
+      invoice.matchStatus = '未匹配项目';
+      continue;
+    }
+    const target = matchedPlans.find((plan) => (
+      plan.projectNo === invoice.projectNo
+      && plan.actualInvoiceAmount < Number(plan.planAmount || 0) - 0.01
+    ));
+    if (!target) {
+      invoice.matchStatus = '计划外开票';
+      continue;
+    }
+
+    invoice.linkedPlanKey = target.planKey;
+    target.linkedInvoiceKeys.push(invoice.detailKey || buildInvoiceDetailKey(invoice));
+    target.actualInvoiceAmount += Number(invoice.invoiceAmount || 0);
+    target.receivedAmount += Number(invoice.receivedAmount || 0);
+    target.actualInvoiceDate = target.actualInvoiceDate || invoice.invoiceDate;
+    target.paymentDate = invoice.paymentDate || target.paymentDate;
+    invoice.matchStatus = '自动匹配';
+  }
+
+  for (const plan of matchedPlans) {
+    const planAmount = Number(plan.planAmount || 0);
+    const actualAmount = Number(plan.actualInvoiceAmount || 0);
+    if (actualAmount > planAmount + 0.01) {
+      plan.matchStatus = '金额异常待确认';
+      plan.diffStatus = '金额异常待确认';
+    } else if (actualAmount > 0) {
+      plan.matchStatus = actualAmount >= planAmount - 0.01 ? '已匹配' : '部分匹配';
+    }
+    plan.invoiceStatus = deriveInvoiceStatus({
+      planDate: plan.planDate,
+      planAmount,
+      actualInvoiceAmount: actualAmount,
+      today,
+    });
+    plan.paymentStatus = derivePaymentStatus({
+      actualInvoiceAmount: actualAmount,
+      receivedAmount: plan.receivedAmount,
+      expectedPaymentDate: plan.expectedPaymentDate,
+      today,
+    });
+    plan.uninvoicedAmount = Math.max(planAmount - actualAmount, 0);
+    plan.unpaidAmount = Math.max(actualAmount - Number(plan.receivedAmount || 0), 0);
+    plan.invoiceOverdueDays = deriveOverdueDays({
+      date: plan.planDate,
+      today,
+      active: plan.invoiceStatus === '开票逾期',
+    });
+    plan.paymentOverdueDays = deriveOverdueDays({
+      date: plan.expectedPaymentDate,
+      today,
+      active: plan.paymentStatus === '回款逾期',
+    });
+  }
+
+  return {
+    plans: matchedPlans,
+    invoices: matchedInvoices.map((invoice) => ({
+      ...invoice,
+      linkedPlanRecordId: invoice.linkedPlanKey ? planByKey.get(invoice.linkedPlanKey)?.recordId : undefined,
+    })),
+  };
 }

@@ -3,14 +3,19 @@ import assert from 'node:assert/strict';
 
 import {
   buildInvoiceCollectionTitle,
+  buildInvoiceDetailKey,
   buildOldProjectNodes,
+  buildPlanUniqueKey,
   buildProgressKey,
+  classifyBossDashboardGroup,
   buildSplitInvoiceNodes,
   classifyApplication,
   collapseReversedInvoices,
   deriveInvoiceStatus,
   deriveOverallStatus,
   derivePaymentStatus,
+  matchInvoicesToPlans,
+  normalizeInvoiceNo,
 } from '../src/rules/invoice-progress-rules.mjs';
 
 test('cutoff rules are explicit', () => {
@@ -64,6 +69,37 @@ test('progress key is stable for actual and plan-only rows', () => {
   assert.equal(buildProgressKey({ projectNo: 'P1', executionPeriod: 2 }), 'P1|2|计划');
 });
 
+test('plan key uses project number and period only', () => {
+  assert.equal(buildPlanUniqueKey({ projectNo: 'P1', period: 2 }), 'P1-2');
+  assert.equal(buildPlanUniqueKey({ projectNo: 'P1' }), 'P1-未定期次');
+});
+
+test('boss dashboard grouping follows manual project classification', () => {
+  assert.equal(classifyBossDashboardGroup('经营项目'), '经营项目总览');
+  assert.equal(classifyBossDashboardGroup('走账项目'), '走账项目总览');
+  assert.equal(classifyBossDashboardGroup('行政/内部项目'), '不纳入');
+  assert.equal(classifyBossDashboardGroup(''), '项目分类待确认');
+});
+
+test('Hankook invoices use default display number when invoice number is blank', () => {
+  assert.deepEqual(normalizeInvoiceNo({
+    customerName: 'Hankook & Company Co., Ltd',
+    invoiceNo: '',
+  }), {
+    rawInvoiceNo: '',
+    displayInvoiceNo: 'Hankook 001',
+    invoiceNoMissing: false,
+    isHankook: true,
+  });
+  assert.equal(buildInvoiceDetailKey({
+    sourceName: '集熠开票明细',
+    projectNo: 'HT2026',
+    customerName: 'Hankook & Company Co., Ltd',
+    invoiceNo: '',
+    sourceId: 'recA',
+  }), '集熠开票明细|HT2026|Hankook 001|recA');
+});
+
 test('invoice collection titles replace blank first fields', () => {
   assert.equal(
     buildInvoiceCollectionTitle({
@@ -95,4 +131,31 @@ test('reversed positive and negative invoices cancel out for progress generation
   ]), [
     { invoiceNo: 'C', invoiceAmount: 300 },
   ]);
+});
+
+test('invoice matching assigns amount mismatch to earliest unfinished period', () => {
+  const today = Date.UTC(2026, 6, 31);
+  const result = matchInvoicesToPlans([
+    { projectNo: 'P1', period: 1, planAmount: 5000, planDate: Date.UTC(2026, 6, 1), expectedPaymentDate: Date.UTC(2026, 6, 20) },
+    { projectNo: 'P1', period: 2, planAmount: 7000, planDate: Date.UTC(2026, 7, 1), expectedPaymentDate: Date.UTC(2026, 7, 20) },
+  ], [
+    { sourceName: '集熠开票明细', projectNo: 'P1', invoiceNo: 'F1', invoiceAmount: 6000, receivedAmount: 1000, invoiceDate: Date.UTC(2026, 6, 2), paymentDate: Date.UTC(2026, 6, 21) },
+  ], { today });
+
+  assert.equal(result.invoices[0].linkedPlanKey, 'P1-1');
+  assert.equal(result.plans[0].matchStatus, '金额异常待确认');
+  assert.equal(result.plans[0].diffStatus, '金额异常待确认');
+  assert.equal(result.plans[1].matchStatus, '待匹配');
+});
+
+test('offset invoices are excluded before matching', () => {
+  const result = matchInvoicesToPlans([
+    { projectNo: 'P1', period: 1, planAmount: 14000 },
+  ], [
+    { sourceName: '集熠开票明细', projectNo: 'P1', invoiceNo: 'F1', invoiceAmount: 14000 },
+    { sourceName: '集熠开票明细', projectNo: 'P1', invoiceNo: 'F2', invoiceAmount: -14000 },
+  ]);
+
+  assert.deepEqual(result.plans.map((plan) => plan.actualInvoiceAmount), [0]);
+  assert.deepEqual(result.invoices.map((invoice) => invoice.matchStatus), ['已抵消', '已抵消']);
 });
