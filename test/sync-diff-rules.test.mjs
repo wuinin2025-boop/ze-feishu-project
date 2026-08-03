@@ -60,3 +60,24 @@ test('changed rows include business changes and sync timestamps', () => {
     最后同步时间: today,
   });
 });
+
+test('create-only people fields are not overwritten on existing records', () => {
+  const today = Date.UTC(2026, 7, 4);
+  const result = changedUpdateFields(
+    {
+      项目编号: 'P1',
+      当前项目负责人: [{ id: 'manual_manager' }],
+      项目参与人员: [{ id: 'manual_member' }],
+    },
+    {
+      项目编号: 'P1',
+      当前项目负责人: [{ id: 'source_manager' }],
+      项目参与人员: [{ id: 'source_member' }],
+      源更新时间: today,
+      最后同步时间: today,
+    },
+    { createOnlyFields: ['当前项目负责人', '项目参与人员'] },
+  );
+
+  assert.deepEqual(result, {});
+});
