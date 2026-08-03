@@ -4,6 +4,7 @@ const DAY_MS = 86400000;
 const HANKOOK_CUSTOMER_NAME = 'Hankook & Company Co., Ltd';
 const HANKOOK_DISPLAY_INVOICE_NO = 'Hankook 001';
 const THIRTY_DAYS_MS = DAY_MS * 30;
+const MANUAL_PROJECT_STATUSES = new Set(['暂停', '暂缓', '已终止', '已取消']);
 
 export function classifyApplication(applicationNo) {
   const value = String(applicationNo || '').trim();
@@ -356,6 +357,11 @@ function earliestDate(values) {
   return values.filter(Boolean).sort((left, right) => left - right)[0];
 }
 
+function formatDate(timestamp) {
+  if (!timestamp) return '';
+  return new Date(timestamp).toISOString().slice(0, 10);
+}
+
 function addInvoiceAgg(map, invoice) {
   if (!invoice.projectNo || !invoice.includedInStats) return;
   const agg = map.get(invoice.projectNo) || {
@@ -382,15 +388,18 @@ function addPlanAgg(map, plan, today) {
     future30PlanAmount: 0,
   };
   const planAmount = Number(plan.planAmount || 0);
+  const actualInvoiceAmount = Number(plan.actualInvoiceAmount || 0);
+  const receivedAmount = Number(plan.receivedAmount || 0);
+  const uninvoicedAmount = Math.max(planAmount - actualInvoiceAmount, 0);
   agg.planCount += 1;
   agg.planAmount += planAmount;
-  if ((plan.actualInvoiceAmount || 0) < planAmount - 0.01) {
-    agg.nextPlans.push({ date: plan.planDate, amount: planAmount });
+  if (actualInvoiceAmount < planAmount - 0.01) {
+    agg.nextPlans.push({ date: plan.planDate, amount: uninvoicedAmount });
     if (plan.planDate && plan.planDate >= today && plan.planDate <= today + THIRTY_DAYS_MS) {
-      agg.future30PlanAmount += Math.max(planAmount - Number(plan.actualInvoiceAmount || 0), 0);
+      agg.future30PlanAmount += uninvoicedAmount;
     }
   }
-  if ((plan.receivedAmount || 0) < (plan.actualInvoiceAmount || 0) - 0.01) {
+  if (receivedAmount < planAmount - 0.01) {
     agg.nextPayments.push(plan.expectedPaymentDate);
   }
   if (plan.invoiceStatus === '开票逾期') agg.invoiceOverdueAmount += Number(plan.uninvoicedAmount || 0);
@@ -411,10 +420,84 @@ function projectPaymentStatus({ invoiceAmount, receivedAmount }) {
   return '未收款';
 }
 
+export function deriveProjectStatus({
+  currentStatus = '',
+  projectNo,
+  settlementAmount = 0,
+  settlementCost = 0,
+  plannedAmount = 0,
+  invoiceAmount = 0,
+  receivedAmount = 0,
+}) {
+  if (MANUAL_PROJECT_STATUSES.has(String(currentStatus || '').trim())) return currentStatus;
+  if (!String(projectNo || '').trim()) return '未开始';
+
+  const invoiceTarget = Number(plannedAmount || 0) || Number(settlementAmount || 0);
+  const hasSettlement = Number(settlementAmount || 0) > 0 || Number(settlementCost || 0) > 0;
+  const invoiceCompleted = invoiceTarget > 0 && Number(invoiceAmount || 0) >= invoiceTarget - 0.01;
+  const paymentCompleted = Number(invoiceAmount || 0) > 0 && Number(receivedAmount || 0) >= Number(invoiceAmount || 0) - 0.01;
+
+  if (invoiceCompleted && paymentCompleted) return '已完成';
+  if (hasSettlement || (invoiceCompleted && !paymentCompleted)) return '结算中';
+  return '进行中';
+}
+
+export function deriveProfitRateWarning({ amount = 0, rate }) {
+  if (!Number(amount || 0) || rate === undefined || rate === null || rate === '') return '未计算';
+  const normalizedRate = Number(rate || 0);
+  if (Math.abs(normalizedRate) < 0.000001) return '走账项目/异常';
+  if (normalizedRate < 0.6) return '低于60%';
+  return '正常';
+}
+
+export function deriveProjectStages({
+  projectNo,
+  establishmentAmount = 0,
+  establishmentCost = 0,
+  settlementAmount = 0,
+  settlementCost = 0,
+  poAmount = 0,
+  plannedAmount = 0,
+  invoiceAmount = 0,
+  actualPaymentAmount = 0,
+}) {
+  if (!String(projectNo || '').trim()) return ['预立项'];
+
+  const stages = ['立项'];
+  const invoiceTarget = Number(plannedAmount || 0)
+    || Number(settlementAmount || 0)
+    || Number(establishmentAmount || 0);
+  const paymentTarget = Number(settlementCost || 0)
+    || Number(establishmentCost || 0);
+
+  if (Number(settlementAmount || 0) > 0 || Number(settlementCost || 0) > 0) stages.push('结算');
+  if (Number(poAmount || 0) > 0) stages.push('PO');
+  if (Number(invoiceAmount || 0) > 0 && (!invoiceTarget || Number(invoiceAmount || 0) < invoiceTarget - 0.01)) {
+    stages.push('部分开票');
+  }
+  if (invoiceTarget > 0 && Number(invoiceAmount || 0) >= invoiceTarget - 0.01) stages.push('全部开票');
+  if (Number(actualPaymentAmount || 0) > 0 && (!paymentTarget || Number(actualPaymentAmount || 0) < paymentTarget - 0.01)) {
+    stages.push('部分付款');
+  }
+  if (paymentTarget > 0 && Number(actualPaymentAmount || 0) >= paymentTarget - 0.01) stages.push('全部付款');
+
+  return stages;
+}
+
 function warningStatus({ overdueAmount, nextDate, today }) {
   if (Number(overdueAmount || 0) > 0) return '逾期';
   if (nextDate && nextDate >= today && nextDate <= today + 7 * DAY_MS) return '即将到期';
   return '正常';
+}
+
+function planSummary({ planCount, planAmount, nextPlan, nextPaymentDate }) {
+  const nextPlanText = nextPlan?.date
+    ? `下一开票 ${formatDate(nextPlan.date)}，金额 ${roundCurrency(nextPlan.amount)}`
+    : '暂无下一计划开票';
+  const nextPaymentText = nextPaymentDate
+    ? `下一预计回款 ${formatDate(nextPaymentDate)}`
+    : '暂无下一预计回款';
+  return `计划 ${planCount} 期，计划开票总额 ${roundCurrency(planAmount)}；${nextPlanText}；${nextPaymentText}`;
 }
 
 export function buildProjectOverviewMetricRows({ projects, plans, invoices, today = Date.now() }) {
@@ -426,40 +509,75 @@ export function buildProjectOverviewMetricRows({ projects, plans, invoices, toda
   return projects.flatMap((project) => {
     const invoiceAgg = invoiceByProject.get(project.projectNo);
     const planAgg = planByProject.get(project.projectNo);
-    if (!invoiceAgg && !planAgg) return [];
+    if (!project.recordId || !project.projectNo) return [];
 
     const invoiceAmount = roundCurrency(invoiceAgg?.invoiceAmount);
     const receivedAmount = roundCurrency(invoiceAgg?.receivedAmount);
     const planAmount = roundCurrency(planAgg?.planAmount);
+    const planCount = Number(planAgg?.planCount || 0);
     const nextPlan = (planAgg?.nextPlans || [])
       .filter((item) => item.date)
       .sort((left, right) => left.date - right.date)[0];
     const nextPaymentDate = earliestDate(planAgg?.nextPayments || []);
     const invoiceOverdueAmount = roundCurrency(planAgg?.invoiceOverdueAmount);
     const paymentOverdueAmount = roundCurrency(planAgg?.paymentOverdueAmount);
+    const actualPaymentAmount = roundCurrency(project.actualPaymentAmount);
 
     return [{
       recordId: project.recordId,
       projectNo: project.projectNo,
       fields: {
         '最后同步时间': today,
-        ...(invoiceAgg ? {
-          '已开票金额': invoiceAmount,
-          '已收款金额': receivedAmount,
-        } : {}),
-        ...(planAgg ? {
-          '预计开票总次数': planAgg.planCount,
-          '计划开票总金额': planAmount,
-          '下一计划开票日期': nextPlan?.date,
-          '下一计划开票金额': nextPlan?.amount,
-          '下一预计回款日期': nextPaymentDate,
-          '逾期开票金额': invoiceOverdueAmount,
-          '逾期回款金额': paymentOverdueAmount,
-          '开票状态': projectInvoiceStatus({ plannedAmount: planAmount, invoiceAmount }),
-          '客户收款状态': projectPaymentStatus({ invoiceAmount, receivedAmount }),
-          '开票计划预警': warningStatus({ overdueAmount: invoiceOverdueAmount, nextDate: nextPlan?.date, today }),
-          '回款计划预警': warningStatus({ overdueAmount: paymentOverdueAmount, nextDate: nextPaymentDate, today }),
-        } : {}),
+        '项目状态': deriveProjectStatus({
+          currentStatus: project.projectStatus,
+          projectNo: project.projectNo,
+          settlementAmount: project.settlementAmount,
+          settlementCost: project.settlementCost,
+          plannedAmount: planAmount,
+          invoiceAmount,
+          receivedAmount,
+        }),
+        '系统项目状态': deriveProjectStatus({
+          projectNo: project.projectNo,
+          settlementAmount: project.settlementAmount,
+          settlementCost: project.settlementCost,
+          plannedAmount: planAmount,
+          invoiceAmount,
+          receivedAmount,
+        }),
+        '项目阶段': deriveProjectStages({
+          projectNo: project.projectNo,
+          establishmentAmount: project.establishmentAmount,
+          establishmentCost: project.establishmentCost,
+          settlementAmount: project.settlementAmount,
+          settlementCost: project.settlementCost,
+          poAmount: project.poAmount,
+          plannedAmount: planAmount,
+          invoiceAmount,
+          actualPaymentAmount,
+        }),
+        '累计实际付款金额': actualPaymentAmount,
+        '未关闭风险数': Number(project.openRiskCount || 0),
+        '已开票金额': invoiceAmount,
+        '已收款金额': receivedAmount,
+        '预计开票总次数': planCount,
+        '计划开票总金额': planAmount,
+        '下一计划开票日期': nextPlan?.date ?? null,
+        '下一计划开票金额': nextPlan ? roundCurrency(nextPlan.amount) : null,
+        '下一预计回款日期': nextPaymentDate ?? null,
+        '最近预计回款日期': nextPaymentDate ?? null,
+        '逾期开票金额': invoiceOverdueAmount,
+        '逾期回款金额': paymentOverdueAmount,
+        '开票状态': projectInvoiceStatus({ plannedAmount: planAmount, invoiceAmount }),
+        '客户收款状态': projectPaymentStatus({ invoiceAmount, receivedAmount }),
+        '开票计划预警': warningStatus({ overdueAmount: invoiceOverdueAmount, nextDate: nextPlan?.date, today }),
+        '回款计划预警': warningStatus({ overdueAmount: paymentOverdueAmount, nextDate: nextPaymentDate, today }),
+        '应收数据粒度': [
+          ...(planAgg ? ['计划开票'] : []),
+          ...(invoiceAgg ? ['发票明细'] : []),
+          ...(!planAgg && !invoiceAgg ? ['项目汇总'] : []),
+        ],
+        '开票回款计划说明': planSummary({ planCount, planAmount, nextPlan, nextPaymentDate }),
       },
     }];
   });

@@ -7,7 +7,8 @@
     "test": "node --test",
     "setup:invoice-model": "node src/feishu/ensure-invoice-model.mjs",
     "sync:invoice": "node src/feishu/sync-invoice-progress.mjs",
-    "verify:invoice": "node src/feishu/verify-invoice-progress.mjs"
+    "verify:invoice": "node src/feishu/verify-invoice-progress.mjs",
+    "control": "node src/control-server.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0"

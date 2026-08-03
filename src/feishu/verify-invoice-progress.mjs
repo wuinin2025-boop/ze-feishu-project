@@ -180,6 +180,10 @@ try {
   const offsetSources = markOffsetInvoices(sourceInvoices);
   const includedSourceInvoices = offsetSources.filter((invoice) => invoice.includedInStats);
   const includedDetails = detailRows.filter((row) => textValue(row.fields?.['是否纳入统计']) === '是');
+  const sourceDetailKeys = new Set(sourceInvoices.map((invoice) => invoice.detailKey).filter(Boolean));
+  const staleDetailKeys = detailRows
+    .map((row) => textValue(row.fields?.['明细唯一键']))
+    .filter((key) => key && !sourceDetailKeys.has(key));
 
   const sourceIncludedInvoice = includedSourceInvoices.reduce((total, invoice) => total + (invoice.invoiceAmount || 0), 0);
   const sourceIncludedReceived = includedSourceInvoices.reduce((total, invoice) => total + (invoice.receivedAmount || 0), 0);
@@ -200,6 +204,7 @@ try {
   check('明细唯一键不重复', duplicateDetailKeys.length === 0, JSON.stringify(duplicateDetailKeys.slice(0, 5)));
   check('统一明细开票金额等于源发票抵消后金额', Math.abs(detailIncludedInvoice - sourceIncludedInvoice) < 0.01, `detail=${detailIncludedInvoice}, source=${sourceIncludedInvoice}`);
   check('统一明细收款金额等于源发票抵消后金额', Math.abs(detailIncludedReceived - sourceIncludedReceived) < 0.01, `detail=${detailIncludedReceived}, source=${sourceIncludedReceived}`);
+  check('统一明细不存在源表已删除记录', staleDetailKeys.length === 0, JSON.stringify(staleDetailKeys.slice(0, 5)));
   check('行政/内部项目不进入老板驾驶舱经营或走账分组', adminInDashboardRows.length === 0, `rows=${adminInDashboardRows.length}`);
   check('Hankook 空发票号使用默认显示值', badHankookRows.length === 0, `bad=${badHankookRows.length}, hankook=${hankookRows.length}`);
 

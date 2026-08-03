@@ -15,6 +15,9 @@ import {
   deriveInvoiceStatus,
   deriveOverallStatus,
   derivePaymentStatus,
+  deriveProfitRateWarning,
+  deriveProjectStatus,
+  deriveProjectStages,
   matchInvoicesToPlans,
   normalizeInvoiceNo,
 } from '../src/rules/invoice-progress-rules.mjs';
@@ -80,6 +83,59 @@ test('dashboard grouping follows manual project classification', () => {
   assert.equal(classifyDashboardGroup('走账项目'), '走账项目总览');
   assert.equal(classifyDashboardGroup('行政/内部项目'), '不纳入');
   assert.equal(classifyDashboardGroup(''), '项目分类待确认');
+});
+
+test('project stages are derived from real project progress', () => {
+  assert.deepEqual(deriveProjectStages({ projectNo: '' }), ['预立项']);
+  assert.deepEqual(deriveProjectStages({
+    projectNo: 'P1',
+    establishmentAmount: 1000,
+    establishmentCost: 600,
+  }), ['立项']);
+  assert.deepEqual(deriveProjectStages({
+    projectNo: 'P1',
+    settlementAmount: 1200,
+    settlementCost: 700,
+    poAmount: 500,
+    plannedAmount: 1200,
+    invoiceAmount: 1200,
+    actualPaymentAmount: 700,
+  }), ['立项', '结算', 'PO', '全部开票', '全部付款']);
+  assert.deepEqual(deriveProjectStages({
+    projectNo: 'P1',
+    establishmentAmount: 1000,
+    establishmentCost: 600,
+    invoiceAmount: 300,
+    actualPaymentAmount: 200,
+  }), ['立项', '部分开票', '部分付款']);
+});
+
+test('project status preserves pause and follows invoice collection progress', () => {
+  assert.equal(deriveProjectStatus({ currentStatus: '暂停', projectNo: 'P1' }), '暂停');
+  assert.equal(deriveProjectStatus({ currentStatus: '暂缓', projectNo: 'P1' }), '暂缓');
+  assert.equal(deriveProjectStatus({ currentStatus: '已终止', projectNo: 'P1' }), '已终止');
+  assert.equal(deriveProjectStatus({ currentStatus: '已取消', projectNo: 'P1' }), '已取消');
+  assert.equal(deriveProjectStatus({ projectNo: '' }), '未开始');
+  assert.equal(deriveProjectStatus({
+    projectNo: 'P1',
+    plannedAmount: 1000,
+    invoiceAmount: 1000,
+    receivedAmount: 1000,
+  }), '已完成');
+  assert.equal(deriveProjectStatus({
+    projectNo: 'P1',
+    plannedAmount: 1000,
+    invoiceAmount: 1000,
+    receivedAmount: 200,
+  }), '结算中');
+  assert.equal(deriveProjectStatus({ projectNo: 'P1' }), '进行中');
+});
+
+test('profit rate warning uses decimal rates', () => {
+  assert.equal(deriveProfitRateWarning({ amount: 0, rate: 0.7 }), '未计算');
+  assert.equal(deriveProfitRateWarning({ amount: 1000, rate: 0 }), '走账项目/异常');
+  assert.equal(deriveProfitRateWarning({ amount: 1000, rate: 0.5 }), '低于60%');
+  assert.equal(deriveProfitRateWarning({ amount: 1000, rate: 0.6 }), '正常');
 });
 
 test('Hankook invoices use default display number when invoice number is blank', () => {
@@ -161,13 +217,13 @@ test('offset invoices are excluded before matching', () => {
   assert.deepEqual(result.invoices.map((invoice) => invoice.matchStatus), ['已抵消', '已抵消']);
 });
 
-test('project overview metric rows refresh invoice and plan fields only for touched projects', () => {
+test('project overview metric rows refresh project-level derived fields', () => {
   const today = Date.UTC(2026, 6, 31);
   const rows = buildProjectOverviewMetricRows({
     today,
     projects: [
-      { recordId: 'rec1', projectNo: 'P1', projectCategory: '经营项目' },
-      { recordId: 'rec2', projectNo: 'P2', projectCategory: '走账项目' },
+      { recordId: 'rec1', projectNo: 'P1', projectCategory: '经营项目', openRiskCount: 2 },
+      { recordId: 'rec2', projectNo: 'P2', projectCategory: '走账项目', projectStatus: '暂停' },
     ],
     invoices: [
       { projectNo: 'P1', includedInStats: true, invoiceAmount: 600, receivedAmount: 100 },
@@ -188,7 +244,7 @@ test('project overview metric rows refresh invoice and plan fields only for touc
     ],
   });
 
-  assert.equal(rows.length, 1);
+  assert.equal(rows.length, 2);
   assert.equal(rows[0].recordId, 'rec1');
   assert.equal(rows[0].fields['已开票金额'], 600);
   assert.equal(rows[0].fields['已收款金额'], 100);
@@ -196,4 +252,13 @@ test('project overview metric rows refresh invoice and plan fields only for touc
   assert.equal(rows[0].fields['逾期回款金额'], 500);
   assert.equal(rows[0].fields['开票状态'], '部分开票');
   assert.equal(rows[0].fields['客户收款状态'], '部分收款');
+  assert.equal(rows[0].fields['下一计划开票金额'], 400);
+  assert.equal(rows[0].fields['未关闭风险数'], 2);
+  assert.equal(rows[0].fields['项目状态'], '进行中');
+  assert.equal(rows[0].fields['系统项目状态'], '进行中');
+  assert.deepEqual(rows[0].fields['应收数据粒度'], ['计划开票', '发票明细']);
+  assert.deepEqual(rows[0].fields['项目阶段'], ['立项', '部分开票']);
+  assert.equal(rows[1].fields['项目状态'], '暂停');
+  assert.equal(rows[1].fields['系统项目状态'], '进行中');
+  assert.deepEqual(rows[1].fields['应收数据粒度'], ['项目汇总']);
 });
