@@ -5,8 +5,51 @@ import http from 'node:http';
 import process from 'node:process';
 
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || '0.0.0.0';
+const BASE_PATH = normalizeBasePath(process.env.BASE_PATH || '/');
+const CONTROL_PASSWORD = process.env.CONTROL_PASSWORD || '';
 let running = false;
 const recentRuns = [];
+
+function normalizeBasePath(value) {
+  const trimmed = String(value || '/').trim();
+  if (!trimmed || trimmed === '/') return '/';
+  return `/${trimmed.replace(/^\/+|\/+$/g, '')}`;
+}
+
+function withBasePath(path) {
+  if (BASE_PATH === '/') return path;
+  return `${BASE_PATH}${path === '/' ? '/' : path}`;
+}
+
+function routePath(url = '/') {
+  const pathname = new URL(url, 'http://localhost').pathname;
+  if (BASE_PATH === '/') return pathname;
+  if (pathname === BASE_PATH) return '/';
+  if (pathname.startsWith(`${BASE_PATH}/`)) return pathname.slice(BASE_PATH.length);
+  return pathname;
+}
+
+function unauthorized(res) {
+  res.writeHead(401, {
+    'content-type': 'text/plain; charset=utf-8',
+    'www-authenticate': 'Basic realm="ZE Feishu Control"',
+  });
+  res.end('需要输入访问密码');
+}
+
+function isAuthorized(req) {
+  if (!CONTROL_PASSWORD) return true;
+  const header = req.headers.authorization || '';
+  if (!header.startsWith('Basic ')) return false;
+  try {
+    const decoded = Buffer.from(header.slice('Basic '.length), 'base64').toString('utf8');
+    const password = decoded.slice(decoded.indexOf(':') + 1);
+    return password === CONTROL_PASSWORD;
+  } catch {
+    return false;
+  }
+}
 
 function sendJson(res, status, data) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
@@ -157,6 +200,7 @@ function html() {
     </section>
   </main>
   <script>
+    const BASE_PATH = ${JSON.stringify(BASE_PATH)};
     const buttons = [...document.querySelectorAll('button[data-task]')];
     const statusEl = document.querySelector('#status');
     const summaryEl = document.querySelector('#summary');
@@ -268,7 +312,7 @@ function html() {
       statusEl.textContent = '运行中，请保持这个终端窗口打开...';
       statusEl.className = 'muted';
       try {
-        const response = await fetch('/api/run', {
+        const response = await fetch(BASE_PATH.replace(/\\/$/, '') + '/api/run', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ task }),
@@ -293,12 +337,22 @@ function html() {
 }
 
 const server = http.createServer(async (req, res) => {
-  if (req.method === 'GET' && req.url === '/') {
+  const pathname = routePath(req.url);
+  if (!isAuthorized(req)) {
+    unauthorized(res);
+    return;
+  }
+  if (BASE_PATH !== '/' && new URL(req.url, 'http://localhost').pathname === BASE_PATH) {
+    res.writeHead(302, { location: `${BASE_PATH}/` });
+    res.end();
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(html());
     return;
   }
-  if (req.method === 'POST' && req.url === '/api/run') {
+  if (req.method === 'POST' && pathname === '/api/run') {
     if (running) {
       sendJson(res, 409, { error: '已有任务正在运行，请等它结束后再点。' });
       return;
@@ -324,7 +378,7 @@ const server = http.createServer(async (req, res) => {
     });
     return;
   }
-  if (req.method === 'GET' && req.url === '/api/recent') {
+  if (req.method === 'GET' && pathname === '/api/recent') {
     sendJson(res, 200, { recentRuns });
     return;
   }
@@ -332,6 +386,6 @@ const server = http.createServer(async (req, res) => {
   res.end('Not found');
 });
 
-server.listen(PORT, () => {
-  console.log(`本地控制台已启动：http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`控制台已启动：http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}${withBasePath('/')}`);
 });
