@@ -1,12 +1,12 @@
-# ze-feishu-project
+# 飞书项目中心本地脚本说明
 
-Clean implementation for the Feishu project center.
+这个仓库只保留开票计划、开票明细统一、开票核对相关脚本。
 
-## Continue on a New Computer
+协作者、角色成员、精细化权限、项目状态、日常视图、老板驾驶舱、同步日志、权限自动化都不再由本地脚本维护，统一在飞书里手动配置或用飞书自身能力处理。
 
-Before running the scripts, install Node.js 20+, sign in to Codex, and authorize the Feishu MCP connection for the target base.
+## 新电脑使用
 
-For a completely new computer:
+新电脑先安装 Node.js 20 以上版本，登录 Codex，并授权飞书 MCP。
 
 ```bash
 git clone https://github.com/wuinin2025-boop/ze-feishu-project.git
@@ -17,7 +17,7 @@ npm run setup:invoice-model
 npm run verify:invoice
 ```
 
-For a computer where the repository already exists:
+已经拉过代码的电脑：
 
 ```bash
 cd /path/to/ze-feishu-project
@@ -26,86 +26,101 @@ npm install
 npm test
 ```
 
-To create or repair the second-stage invoice model structure:
+## 当前保留的核心表
+
+- `项目总览表`：项目主表。`项目分类管理` 只在这里人工维护，取值为 `经营项目`、`行政/内部项目`、`走账项目`。
+- `项目线索表`：线索项目主表。
+- `项目进度表`：日常任务和项目日报。
+- `项目开票计划表`：新项目开票计划表，来自审批通过的 `源_立项申请` 开票计划。唯一键为 `项目编号-计划期次`。
+- `开票明细统一表`：三张 `源_开票明细` 的统一结果表，用来承载实际开票、收款、欠款、红冲、项目匹配、计划匹配。
+- `（旧项目）开票计划补录表`：旧项目人工补录表，当前仍在人工维护，本地脚本不能写入、清理或重建这张表。
+
+## 可以删除或已经删除的旧表
+
+这些表不再由本地脚本依赖：
+
+- `老板驾驶舱关键数据表`
+- `项目开票进度表`
+- `开票明细归集表`
+- `同步日志`
+- `系统_人员权限表`
+- `系统_负责人变更记录表`
+- `系统_立项公司配置表`
+
+`系统_历史开票收款明细` 目前本地脚本也没有引用。它更像旧历史财务表，建议确认旧项目补录已完成、没有人工查询需求后再删除。
+
+## 源表使用情况
+
+本地脚本会读取：
+
+- `源_立项申请`：读取审批通过的新项目开票计划。
+- `源_集熠开票明细`
+- `源_冶堂开票明细`
+- `源_亦所开票明细`
+
+本地脚本当前不读取：
+
+- `源_PO申请`
+- `源_付款申请`
+
+如果以后要做供应商付款、成本、毛利或应付分析，再单独设计这两张表的用途。
+
+## 开票明细是否自动更新
+
+当前本地脚本不会实时监听飞书源表。
+
+三张 `源_开票明细` 有新增或修改后，`开票明细统一表` 需要运行下面命令才会刷新：
+
+```bash
+npm run sync:invoice
+npm run verify:invoice
+```
+
+如果希望完全自动更新，需要在飞书自动化里配置三张源明细表到 `开票明细统一表` 的自动新增/更新流程，或者用外部定时任务定时运行 `npm run sync:invoice`。
+
+## 脚本命令
+
+创建或修复开票模型结构：
 
 ```bash
 npm run setup:invoice-model
 ```
 
-This is idempotent: it creates missing fields/tables/views and skips existing ones.
-
-To refresh Feishu invoice data:
+同步开票计划和开票明细：
 
 ```bash
 npm run sync:invoice
-npm run verify:invoice
 ```
 
-People collaborators, role members, and fine-grained permissions are maintained manually in Feishu advanced permissions. This repository no longer syncs or verifies role membership from system personnel tables.
-
-Project status, daily views, overdue dashboards, sync logs, local control pages, and permission automation have been retired from the local scripts. Maintain those directly in Feishu.
-
-`（旧项目）开票计划补录表` is currently maintained manually in Feishu. Local scripts must not create, update, prune, or restructure its records.
-
-The second-stage invoice model uses:
-
-- `项目总览表.项目分类管理`: manual source of truth for project classification. Values are `经营项目`, `行政/内部项目`, and `走账项目`.
-- `项目开票计划表`: generated from approved `源_立项申请` invoice plan rows for new projects. Plan key is `项目编号-计划期次`.
-- `开票明细统一表`: generated from the three `源_开票明细` tables. Invoice key uses source body plus invoice number; Hankook blank invoice numbers display as `Hankook 001`.
-- `老板驾驶舱关键数据表`: generated summary table with two rows, `经营项目总览` and `走账项目总览`.
-
-Classification is carried into the new invoice tables through `关联项目` and formula fields. Do not make scripts write project classification or boss-dashboard grouping as manual values.
-
-If `项目总览表.项目分类管理` changes, Feishu formula fields update automatically in linked tables. The two-row boss dashboard summary and project overview financial totals are refreshed when running:
+核对开票计划和开票明细：
 
 ```bash
-npm run sync:invoice
 npm run verify:invoice
 ```
 
-Current matching rules:
+运行自动测试：
 
-- A source invoice is matched to the earliest unfinished plan period for the same project.
-- Amount mismatches are marked `金额异常待确认`; excess amount is not rolled into the next period.
-- Positive and negative invoice pairs with equal absolute amount cancel out and are excluded from statistics.
-- `行政/内部项目` is excluded from boss-dashboard grouping; `经营项目` and `走账项目` are separated into their own overview groups.
+```bash
+npm test
+```
 
-Prerequisites:
+## 安全规则
 
-- Node.js 20+.
-- Codex/Feishu MCP is configured on the new computer and can access the target Feishu base.
-- The target Feishu base is editable; all `源_` tables remain read-only.
+- 不能写入任何 `源_` 表。
+- 不能写入 `（旧项目）开票计划补录表`。
+- 不能让本地脚本维护协作者、角色成员或高级权限。
+- 不能再创建 `老板驾驶舱关键数据表`。
+- 不能再写入 `项目开票进度表`、`开票明细归集表`、`同步日志`。
+- `项目分类管理` 只在 `项目总览表` 人工维护，下游表通过 `关联项目` 和公式字段引用。
 
-## Safety Rules
+## 当前匹配规则
 
-- Never write to tables whose name starts with `源_`.
-- Do not run old `feishu-xmxt0716` receivable sync scripts.
-- Do not run old permission automation scripts; Feishu advanced permissions are the source of truth for collaborators and role members.
-- Do not run old project-status, views, boss-dashboard, sync-log, or local-control automation scripts.
-- Do not let local scripts write `（旧项目）开票计划补录表`; it is under manual backfill.
-- Do not write `项目分类管理` outside `项目总览表`; downstream tables should reference it through `关联项目`.
-- Keep old Feishu invoice/progress tables untouched until the second-stage data is approved.
+- 源发票按项目匹配到最早未完成的计划期次。
+- 金额不一致时标记为 `金额异常待确认`，不自动滚动到下一期。
+- 正负金额相同的发票对视为红冲抵消，不纳入统计。
+- `行政/内部项目` 不进入老板驾驶舱统计。
+- `经营项目` 和 `走账项目` 必须分开展示、分开统计、分开看风险。
 
-## Current Invoice Tables
+## 最新设计文档
 
-- `项目开票计划表`
-- `开票明细统一表`
-- `老板驾驶舱关键数据表`
-- `（旧项目）开票计划补录表`
-
-Daily operating views:
-
-- `项目进度表` -> `日常任务`
-- `（旧项目）开票计划补录表` -> `日常补录`
-- `项目开票计划表` -> `待匹配计划`
-- `项目开票计划表` -> `金额异常待确认`
-- `项目开票计划表` -> `开票逾期`
-- `项目开票计划表` -> `回款逾期`
-- `开票明细统一表` -> `待匹配发票`
-- `开票明细统一表` -> `红冲待确认`
-- `老板驾驶舱关键数据表` -> `经营项目总览`
-- `老板驾驶舱关键数据表` -> `走账项目总览`
-
-Latest validation report:
-
-- `docs/trial-results/2026-07-31-invoice-model-verification.md`
+- `docs/superpowers/specs/2026-07-31-boss-dashboard-v5-design.md`

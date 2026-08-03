@@ -105,7 +105,7 @@ function linkLookupExpression({ tableId, linkFieldId, targetFieldId, combine = '
   return `bitable::$table[${tableId}].$field[${linkFieldId}].$column[${targetFieldId}].${combine}`;
 }
 
-function bossDashboardGroupExpression(tableId, categoryFieldId) {
+function dashboardGroupExpression(tableId, categoryFieldId) {
   const fieldRef = `bitable::$table[${tableId}].$field[${categoryFieldId}]`;
   return `IF(${fieldRef}="经营项目","经营项目总览",IF(${fieldRef}="走账项目","走账项目总览",IF(${fieldRef}="行政/内部项目","不纳入","项目分类待确认")))`;
 }
@@ -256,13 +256,11 @@ async function ensureInvoiceModel(client) {
 
   const planTableId = await ensureTable(client, tablesByName, TARGET_TABLE_NAMES.invoicePlan, '计划唯一键', '全部计划', report);
   const detailTableId = await ensureTable(client, tablesByName, TARGET_TABLE_NAMES.invoiceDetail, '明细唯一键', '全部明细', report);
-  const bossDashboardTableId = await ensureTable(client, tablesByName, TARGET_TABLE_NAMES.bossDashboard, '驾驶舱模块', '全部数据', report);
-  if (DRY_RUN && (!planTableId || !detailTableId || !bossDashboardTableId)) return report;
+  if (DRY_RUN && (!planTableId || !detailTableId)) return report;
 
   const refreshedTables = new Map((await listTables(client)).map((table) => [table.name, table.table_id]));
   const actualPlanTableId = refreshedTables.get(TARGET_TABLE_NAMES.invoicePlan) || planTableId;
   const actualDetailTableId = refreshedTables.get(TARGET_TABLE_NAMES.invoiceDetail) || detailTableId;
-  const actualBossDashboardTableId = refreshedTables.get(TARGET_TABLE_NAMES.bossDashboard) || bossDashboardTableId;
   const actualOverviewFields = new Map((await listFields(client, projectOverviewId)).map((fieldItem) => [fieldItem.field_name, fieldItem]));
   const projectNoFieldId = actualOverviewFields.get('项目编号')?.field_id;
   const projectNameFieldId = actualOverviewFields.get('项目名称')?.field_id;
@@ -270,7 +268,6 @@ async function ensureInvoiceModel(client) {
 
   const planFields = new Map((await listFields(client, actualPlanTableId)).map((fieldItem) => [fieldItem.field_name, fieldItem]));
   const detailFields = new Map((await listFields(client, actualDetailTableId)).map((fieldItem) => [fieldItem.field_name, fieldItem]));
-  const bossDashboardFields = new Map((await listFields(client, actualBossDashboardTableId)).map((fieldItem) => [fieldItem.field_name, fieldItem]));
 
   const planProjectLink = await ensureField(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, planFields, singleLink('关联项目', projectOverviewId, '关联项目总览表；项目编号、项目名称、项目分类管理从这里引用。'), report);
   await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, singleLink('关联项目', projectOverviewId, '关联项目总览表；项目编号、项目名称、项目分类管理从这里引用。'), report);
@@ -319,28 +316,6 @@ async function ensureInvoiceModel(client) {
   await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, text('备注'), report);
   await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, date('最后同步时间'), report);
 
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, select('项目分类', CATEGORY_OPTIONS), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('项目数量'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('立项金额'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('结算金额'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('计划开票金额'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('开票基准金额'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('已开票金额'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('未开票金额'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('开票完成率'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('已收款金额'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('未收款金额'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('回款完成率'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('逾期开票金额'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('逾期回款金额'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('开票逾期项目数'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('回款逾期项目数'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('金额异常项目数'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, number('未来30天计划开票金额'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, date('下一计划开票日期'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, date('下一预计回款日期'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, bossDashboardFields, date('最后同步时间'), report);
-
   await ensureField(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, planFields, singleLink('关联发票', actualDetailTableId, '脚本匹配到本计划期次的开票明细。', true), report);
   await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, singleLink('关联计划', actualPlanTableId, '脚本匹配到的项目开票计划期次。'), report);
 
@@ -364,10 +339,10 @@ async function ensureInvoiceModel(client) {
   const planCategoryFieldId = newestPlanFields.get('项目分类管理')?.field_id;
   const detailCategoryFieldId = newestDetailFields.get('项目分类管理')?.field_id;
   if (planCategoryFieldId) {
-    await ensureField(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, newestPlanFields, formula('老板驾驶舱分组', bossDashboardGroupExpression(actualPlanTableId, planCategoryFieldId), 1, '公式：经营项目进入经营项目总览，走账项目进入走账项目总览，行政/内部项目不纳入。'), report);
+    await ensureField(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, newestPlanFields, formula('老板驾驶舱分组', dashboardGroupExpression(actualPlanTableId, planCategoryFieldId), 1, '公式：经营项目进入经营项目总览，走账项目进入走账项目总览，行政/内部项目不纳入。'), report);
   }
   if (detailCategoryFieldId) {
-    await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, newestDetailFields, formula('老板驾驶舱分组', bossDashboardGroupExpression(actualDetailTableId, detailCategoryFieldId), 1, '公式：经营项目进入经营项目总览，走账项目进入走账项目总览，行政/内部项目不纳入。'), report);
+    await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, newestDetailFields, formula('老板驾驶舱分组', dashboardGroupExpression(actualDetailTableId, detailCategoryFieldId), 1, '公式：经营项目进入经营项目总览，走账项目进入走账项目总览，行政/内部项目不纳入。'), report);
   }
 
   await ensureViews(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, [
@@ -383,10 +358,6 @@ async function ensureInvoiceModel(client) {
     '金额异常待确认',
     '红冲待确认',
     '重复明细唯一键',
-  ], report);
-  await ensureViews(client, TARGET_TABLE_NAMES.bossDashboard, actualBossDashboardTableId, [
-    '经营项目总览',
-    '走账项目总览',
   ], report);
 
   return report;

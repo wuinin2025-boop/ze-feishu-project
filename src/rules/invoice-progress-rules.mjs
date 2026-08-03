@@ -44,7 +44,7 @@ export function buildPlanUniqueKey({ projectNo, period }) {
   return [projectNo || '未匹配项目', period || '未定期次'].join('-');
 }
 
-export function classifyBossDashboardGroup(category) {
+export function classifyDashboardGroup(category) {
   const value = String(category || '').trim();
   if (value === '经营项目') return '经营项目总览';
   if (value === '走账项目') return '走账项目总览';
@@ -56,8 +56,8 @@ export function isIncludedInBossDashboard(category) {
   return ['经营项目', '走账项目'].includes(String(category || '').trim());
 }
 
-export function bossDashboardModuleForCategory(category) {
-  const group = classifyBossDashboardGroup(category);
+export function dashboardGroupForCategory(category) {
+  const group = classifyDashboardGroup(category);
   return ['经营项目总览', '走账项目总览'].includes(group) ? group : '';
 }
 
@@ -352,12 +352,6 @@ function roundCurrency(value) {
   return Number((Number(value || 0)).toFixed(2));
 }
 
-function ratio(numerator, denominator) {
-  const bottom = Number(denominator || 0);
-  if (!bottom) return 0;
-  return Number((Number(numerator || 0) / bottom).toFixed(4));
-}
-
 function earliestDate(values) {
   return values.filter(Boolean).sort((left, right) => left - right)[0];
 }
@@ -469,98 +463,4 @@ export function buildProjectOverviewMetricRows({ projects, plans, invoices, toda
       },
     }];
   });
-}
-
-export function buildBossDashboardRows({ projects, plans, invoices, today = Date.now() }) {
-  const invoiceByProject = new Map();
-  const planByProject = new Map();
-  for (const invoice of invoices) addInvoiceAgg(invoiceByProject, invoice);
-  for (const plan of plans) addPlanAgg(planByProject, plan, today);
-
-  const rowsByModule = new Map([
-    ['经营项目总览', { module: '经营项目总览', category: '经营项目' }],
-    ['走账项目总览', { module: '走账项目总览', category: '走账项目' }],
-  ]);
-
-  for (const base of rowsByModule.values()) {
-    Object.assign(base, {
-      projectCount: 0,
-      establishmentAmount: 0,
-      settlementAmount: 0,
-      planAmount: 0,
-      invoiceBaseAmount: 0,
-      invoiceAmount: 0,
-      receivedAmount: 0,
-      uninvoicedAmount: 0,
-      unpaidAmount: 0,
-      invoiceOverdueAmount: 0,
-      paymentOverdueAmount: 0,
-      invoiceOverdueProjectCount: 0,
-      paymentOverdueProjectCount: 0,
-      amountExceptionProjectCount: 0,
-      future30PlanAmount: 0,
-      nextPlanDates: [],
-      nextPaymentDates: [],
-    });
-  }
-
-  for (const project of projects) {
-    const module = bossDashboardModuleForCategory(project.projectCategory);
-    if (!module) continue;
-    const row = rowsByModule.get(module);
-    const invoiceAgg = invoiceByProject.get(project.projectNo) || {};
-    const planAgg = planByProject.get(project.projectNo) || {};
-    const invoiceAmount = Number(invoiceAgg.invoiceAmount ?? project.invoicedAmount ?? 0);
-    const receivedAmount = Number(invoiceAgg.receivedAmount ?? project.receivedAmount ?? 0);
-    const planAmount = Number(planAgg.planAmount ?? project.planInvoiceAmount ?? 0);
-    const invoiceBaseAmount = Math.max(planAmount, Number(project.settlementAmount || 0), invoiceAmount);
-    const invoiceOverdueAmount = Number(planAgg.invoiceOverdueAmount ?? project.overdueInvoiceAmount ?? 0);
-    const paymentOverdueAmount = Number(planAgg.paymentOverdueAmount ?? project.overduePaymentAmount ?? 0);
-
-    row.projectCount += 1;
-    row.establishmentAmount += Number(project.establishmentAmount || 0);
-    row.settlementAmount += Number(project.settlementAmount || 0);
-    row.planAmount += planAmount;
-    row.invoiceBaseAmount += invoiceBaseAmount;
-    row.invoiceAmount += invoiceAmount;
-    row.receivedAmount += receivedAmount;
-    row.uninvoicedAmount += Math.max(invoiceBaseAmount - invoiceAmount, 0);
-    row.unpaidAmount += Math.max(invoiceAmount - receivedAmount, 0);
-    row.invoiceOverdueAmount += invoiceOverdueAmount;
-    row.paymentOverdueAmount += paymentOverdueAmount;
-    row.future30PlanAmount += Number(planAgg.future30PlanAmount || 0);
-    row.amountExceptionProjectCount += Number(planAgg.amountExceptionCount || 0) > 0 ? 1 : 0;
-    if (invoiceOverdueAmount > 0) row.invoiceOverdueProjectCount += 1;
-    if (paymentOverdueAmount > 0) row.paymentOverdueProjectCount += 1;
-    row.nextPlanDates.push(...(planAgg.nextPlans || []).map((item) => item.date));
-    row.nextPaymentDates.push(...(planAgg.nextPayments || []));
-  }
-
-  return [...rowsByModule.values()].map((row) => ({
-    module: row.module,
-    fields: {
-      '驾驶舱模块': row.module,
-      '项目分类': row.category,
-      '项目数量': row.projectCount,
-      '立项金额': roundCurrency(row.establishmentAmount),
-      '结算金额': roundCurrency(row.settlementAmount),
-      '计划开票金额': roundCurrency(row.planAmount),
-      '开票基准金额': roundCurrency(row.invoiceBaseAmount),
-      '已开票金额': roundCurrency(row.invoiceAmount),
-      '未开票金额': roundCurrency(row.uninvoicedAmount),
-      '开票完成率': ratio(row.invoiceAmount, row.invoiceBaseAmount),
-      '已收款金额': roundCurrency(row.receivedAmount),
-      '未收款金额': roundCurrency(row.unpaidAmount),
-      '回款完成率': ratio(row.receivedAmount, row.invoiceAmount),
-      '逾期开票金额': roundCurrency(row.invoiceOverdueAmount),
-      '逾期回款金额': roundCurrency(row.paymentOverdueAmount),
-      '开票逾期项目数': row.invoiceOverdueProjectCount,
-      '回款逾期项目数': row.paymentOverdueProjectCount,
-      '金额异常项目数': row.amountExceptionProjectCount,
-      '未来30天计划开票金额': roundCurrency(row.future30PlanAmount),
-      '下一计划开票日期': earliestDate(row.nextPlanDates),
-      '下一预计回款日期': earliestDate(row.nextPaymentDates),
-      '最后同步时间': today,
-    },
-  }));
 }

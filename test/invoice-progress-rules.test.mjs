@@ -4,12 +4,11 @@ import assert from 'node:assert/strict';
 import {
   buildInvoiceCollectionTitle,
   buildInvoiceDetailKey,
-  buildBossDashboardRows,
   buildOldProjectNodes,
   buildPlanUniqueKey,
   buildProjectOverviewMetricRows,
   buildProgressKey,
-  classifyBossDashboardGroup,
+  classifyDashboardGroup,
   buildSplitInvoiceNodes,
   classifyApplication,
   collapseReversedInvoices,
@@ -76,11 +75,11 @@ test('plan key uses project number and period only', () => {
   assert.equal(buildPlanUniqueKey({ projectNo: 'P1' }), 'P1-未定期次');
 });
 
-test('boss dashboard grouping follows manual project classification', () => {
-  assert.equal(classifyBossDashboardGroup('经营项目'), '经营项目总览');
-  assert.equal(classifyBossDashboardGroup('走账项目'), '走账项目总览');
-  assert.equal(classifyBossDashboardGroup('行政/内部项目'), '不纳入');
-  assert.equal(classifyBossDashboardGroup(''), '项目分类待确认');
+test('dashboard grouping follows manual project classification', () => {
+  assert.equal(classifyDashboardGroup('经营项目'), '经营项目总览');
+  assert.equal(classifyDashboardGroup('走账项目'), '走账项目总览');
+  assert.equal(classifyDashboardGroup('行政/内部项目'), '不纳入');
+  assert.equal(classifyDashboardGroup(''), '项目分类待确认');
 });
 
 test('Hankook invoices use default display number when invoice number is blank', () => {
@@ -197,46 +196,4 @@ test('project overview metric rows refresh invoice and plan fields only for touc
   assert.equal(rows[0].fields['逾期回款金额'], 500);
   assert.equal(rows[0].fields['开票状态'], '部分开票');
   assert.equal(rows[0].fields['客户收款状态'], '部分收款');
-});
-
-test('boss dashboard rows include operating and pass-through projects but exclude admin projects', () => {
-  const today = Date.UTC(2026, 6, 31);
-  const rows = buildBossDashboardRows({
-    today,
-    projects: [
-      { projectNo: 'P1', projectCategory: '经营项目', establishmentAmount: 1000, settlementAmount: 900 },
-      { projectNo: 'P2', projectCategory: '走账项目', establishmentAmount: 300, settlementAmount: 0 },
-      { projectNo: 'P3', projectCategory: '行政/内部项目', establishmentAmount: 10000, settlementAmount: 0 },
-    ],
-    invoices: [
-      { projectNo: 'P1', includedInStats: true, invoiceAmount: 600, receivedAmount: 100 },
-      { projectNo: 'P2', includedInStats: true, invoiceAmount: 300, receivedAmount: 300 },
-      { projectNo: 'P3', includedInStats: true, invoiceAmount: 9000, receivedAmount: 9000 },
-    ],
-    plans: [
-      {
-        projectNo: 'P1',
-        planAmount: 1000,
-        planDate: Date.UTC(2026, 7, 15),
-        expectedPaymentDate: Date.UTC(2026, 7, 30),
-        actualInvoiceAmount: 600,
-        receivedAmount: 100,
-        future30PlanAmount: 400,
-        diffStatus: '金额异常待确认',
-      },
-    ],
-  });
-
-  const operating = rows.find((row) => row.module === '经营项目总览').fields;
-  const passThrough = rows.find((row) => row.module === '走账项目总览').fields;
-  assert.equal(operating['项目数量'], 1);
-  assert.equal(operating['立项金额'], 1000);
-  assert.equal(operating['开票基准金额'], 1000);
-  assert.equal(operating['已开票金额'], 600);
-  assert.equal(operating['未收款金额'], 500);
-  assert.equal(operating['金额异常项目数'], 1);
-  assert.equal(passThrough['项目数量'], 1);
-  assert.equal(passThrough['开票基准金额'], 300);
-  assert.equal(passThrough['已开票金额'], 300);
-  assert.equal(rows.reduce((sum, row) => sum + row.fields['立项金额'], 0), 1300);
 });

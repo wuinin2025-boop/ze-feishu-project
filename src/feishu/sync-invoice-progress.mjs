@@ -6,7 +6,6 @@ import {
   TARGET_TABLE_NAMES,
 } from '../config.mjs';
 import {
-  buildBossDashboardRows,
   buildInvoiceDetailKey,
   buildPlanUniqueKey,
   buildProjectOverviewMetricRows,
@@ -116,7 +115,6 @@ async function tableIdByName(client) {
     TARGET_TABLE_NAMES.projectOverview,
     TARGET_TABLE_NAMES.invoicePlan,
     TARGET_TABLE_NAMES.invoiceDetail,
-    TARGET_TABLE_NAMES.bossDashboard,
   ]) {
     if (!result.has(name)) throw new Error(`Target table not found: ${name}. Run npm run setup:invoice-model first.`);
   }
@@ -394,15 +392,6 @@ function buildProjectOverviewUpdates(projects, matched) {
   }));
 }
 
-function buildBossDashboardUpsertRows(projects, matched) {
-  return buildBossDashboardRows({
-    projects,
-    plans: matched.plans,
-    invoices: matched.invoices,
-    today: NOW,
-  }).map((row) => row.fields);
-}
-
 const client = await connectFeishu([
   'bitable.v1.appTable.list',
   'bitable.v1.appTableRecord.search',
@@ -467,14 +456,6 @@ try {
     tableIds.get(TARGET_TABLE_NAMES.projectOverview),
     projectOverviewUpdates,
   );
-  const bossDashboardRows = buildBossDashboardUpsertRows(projectOverviewRows, matched);
-  const bossDashboardResult = await upsertByKey(
-    client,
-    TARGET_TABLE_NAMES.bossDashboard,
-    tableIds.get(TARGET_TABLE_NAMES.bossDashboard),
-    bossDashboardRows,
-    '驾驶舱模块',
-  );
 
   const report = {
     dry_run: DRY_RUN,
@@ -487,7 +468,6 @@ try {
       unmatched_invoice_rows: matched.invoices.filter((invoice) => ['未匹配项目', '计划外开票', '红冲待确认'].includes(invoice.matchStatus)).length,
       amount_exception_plan_rows: matched.plans.filter((plan) => plan.matchStatus === '金额异常待确认').length,
       project_overview_updates: projectOverviewUpdates.length,
-      boss_dashboard_rows: bossDashboardRows.length,
       ...sourcePlans.stats,
     },
     upsert: {
@@ -498,7 +478,6 @@ try {
         planned: projectOverviewUpdates.length,
         updated: projectOverviewUpdateResult,
       },
-      boss_dashboard: bossDashboardResult,
     },
   };
 
