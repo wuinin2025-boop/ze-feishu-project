@@ -7,6 +7,7 @@ import process from 'node:process';
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
 const BASE_PATH = normalizeBasePath(process.env.BASE_PATH || '/');
+const CONTROL_USERNAME = process.env.CONTROL_USERNAME || '';
 const CONTROL_PASSWORD = process.env.CONTROL_PASSWORD || '';
 let running = false;
 const recentRuns = [];
@@ -39,13 +40,15 @@ function unauthorized(res) {
 }
 
 function isAuthorized(req) {
-  if (!CONTROL_PASSWORD) return true;
+  if (!CONTROL_USERNAME && !CONTROL_PASSWORD) return true;
   const header = req.headers.authorization || '';
   if (!header.startsWith('Basic ')) return false;
   try {
     const decoded = Buffer.from(header.slice('Basic '.length), 'base64').toString('utf8');
-    const password = decoded.slice(decoded.indexOf(':') + 1);
-    return password === CONTROL_PASSWORD;
+    const separatorIndex = decoded.indexOf(':');
+    const username = separatorIndex >= 0 ? decoded.slice(0, separatorIndex) : '';
+    const password = separatorIndex >= 0 ? decoded.slice(separatorIndex + 1) : '';
+    return username === CONTROL_USERNAME && password === CONTROL_PASSWORD;
   } catch {
     return false;
   }
