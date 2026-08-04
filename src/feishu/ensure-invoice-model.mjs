@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   APP_TOKEN,
+  SOURCE_TABLES,
   TARGET_TABLE_NAMES,
 } from '../config.mjs';
 import {
@@ -64,6 +65,30 @@ const PAYMENT_STATUS_OPTIONS = [
   { name: '部分回款', color: 4 },
   { name: '待回款', color: 5 },
   { name: '待补预计回款日期', color: 6 },
+];
+
+const SUPPLIER_PAYMENT_STATUS_OPTIONS = [
+  { name: '未申请付款', color: 1 },
+  { name: '已申请待付款', color: 5 },
+  { name: '部分付款', color: 4 },
+  { name: '已付款', color: 20 },
+  { name: '超额付款', color: 44 },
+  { name: 'PO未通过', color: 2 },
+];
+
+const SUPPLIER_INVOICE_STATUS_OPTIONS = [
+  { name: '未申请付款', color: 1 },
+  { name: '已收票', color: 20 },
+  { name: '部分收票', color: 4 },
+  { name: '未收票', color: 44 },
+  { name: '待确认', color: 5 },
+];
+
+const SUPPLIER_MATCH_STATUS_OPTIONS = [
+  { name: '已匹配项目和付款', color: 20 },
+  { name: '已匹配项目未匹配付款', color: 5 },
+  { name: '项目未匹配', color: 44 },
+  { name: '付款未匹配PO', color: 1 },
 ];
 
 const PROJECT_OVERVIEW_DESCRIPTIONS = {
@@ -171,6 +196,40 @@ const INVOICE_PLAN_DESCRIPTIONS = {
   数据来源: '本地同步写入计划来源：旧项目开票计划补录或源立项开票计划。',
   最后同步时间: '本地同步本次实际改动本计划记录时写入；如果本次计算结果没有变化，会清空该字段，避免误认为数据发生变化。',
   关联发票: '本地同步关联自动匹配到本计划期次的开票明细统一表记录；用于回看实际发票和收款明细。',
+};
+
+const SUPPLIER_COST_DESCRIPTIONS = {
+  成本记录标题: '本地同步生成：项目编号、供应商和 PO 申请编号组合显示。',
+  成本唯一键: '本地同步唯一键；优先使用源_PO申请的 SourceID，缺失时使用 PO 记录 ID。付款申请找不到 PO 时使用付款申请 SourceID 生成异常行。',
+  关联项目: '本地同步按项目编号关联项目总览表；用于按项目查看供应商成本。',
+  关联PO: '本地同步关联对应的源_PO申请记录；只读来源，不写入源表。',
+  关联付款申请: '本地同步关联当前 PO 下的源_付款申请记录；一条 PO 可对应多条付款申请。',
+  项目编号: '本地同步写入；优先取源_PO申请项目编号，付款未匹配 PO 时取源_付款申请项目编号。',
+  项目名称: '本地同步写入；优先取源_PO申请项目名称，付款未匹配 PO 时取源_付款申请项目名称。',
+  立项公司: '本地同步优先取源_PO申请立项公司；用于按公司筛选成本。',
+  供应商: '本地同步写入源_PO申请或源_付款申请中的供应商名称。',
+  服务内容: '本地同步写入源_PO申请的服务内容。',
+  PO申请编号: '本地同步写入源_PO申请申请编号；付款未匹配 PO 时为空。',
+  PO申请状态: '本地同步写入源_PO申请审批状态。',
+  PO申请时间: '本地同步写入源_PO申请发起时间。',
+  PO完成时间: '本地同步写入源_PO申请完成时间。',
+  PO成本金额: '本地同步写入源_PO申请金额1，作为供应商项目成本口径。',
+  PO对客报价金额: '本地同步写入源_PO申请该 PO 对客报价金额，用于核对单条 PO 利润。',
+  PO利润: '本地同步写入源_PO申请利润。',
+  付款申请金额合计: '本地同步汇总该 PO 关联的源_付款申请金额1；这是付款申请金额，不代表实际已付款。',
+  实际付款金额合计: '本地同步汇总供应商付款表中关联该 PO 的实际付款金额；财务人工确认后才代表真实付款。',
+  未付款金额: '本地同步计算：PO成本金额减实际付款金额合计，小于0按0显示。',
+  付款状态: '本地同步计算：无付款申请为未申请付款；有申请未实际付款为已申请待付款；实际付款小于 PO 成本为部分付款；达到为已付款；超过为超额付款。',
+  发票状态: '本地同步根据源_付款申请的发票情况判断：全部收到为已收票，部分收到为部分收票，全部未收到为未收票，没有付款申请为未申请付款。',
+  付款申请编号汇总: '本地同步汇总当前 PO 下所有付款申请编号，多个用顿号分隔。',
+  最近付款申请日期: '本地同步取当前 PO 下最新一条付款申请发起时间。',
+  最近预计付款日期: '本地同步取当前 PO 下最新一条付款申请付款日期。',
+  最近实际付款日期: '本地同步取供应商付款表中当前 PO 最近一次实际付款日期。',
+  数据匹配状态: '本地同步计算项目和付款匹配情况；付款申请找不到 PO 时标记付款未匹配PO。',
+  异常原因: '本地同步写入需要人工处理的问题，例如项目编号未匹配、付款申请未匹配到 PO、实际付款超过 PO 成本。',
+  权限_可管理人员: '本地同步从关联项目的当前项目负责人、项目参与人员、交接协同人带出，供后续高级权限参考。',
+  数据来源: '本地同步写入来源，一般为源_PO申请、源_付款申请和供应商付款。',
+  最后同步时间: '本地同步本次实际改动本记录时写入；如果本次计算结果没有变化，会清空该字段，避免误认为数据发生变化。',
 };
 
 function field(fieldName, type, property = {}, description = '') {
@@ -421,6 +480,7 @@ async function ensureInvoiceModel(client) {
 
   const planTableId = await ensureTable(client, tablesByName, TARGET_TABLE_NAMES.invoicePlan, '计划唯一键', '全部计划', report);
   const detailTableId = await ensureTable(client, tablesByName, TARGET_TABLE_NAMES.invoiceDetail, '明细唯一键', '全部明细', report);
+  const supplierCostTableId = await ensureTable(client, tablesByName, TARGET_TABLE_NAMES.supplierCost, '成本记录标题', '全部成本', report);
   const progressTableId = tablesByName.get(TARGET_TABLE_NAMES.projectProgress);
   if (progressTableId) {
     const progressFields = new Map((await listFields(client, progressTableId)).map((fieldItem) => [fieldItem.field_name, fieldItem]));
@@ -433,11 +493,12 @@ async function ensureInvoiceModel(client) {
       report,
     );
   }
-  if (DRY_RUN && (!planTableId || !detailTableId)) return report;
+  if (DRY_RUN && (!planTableId || !detailTableId || !supplierCostTableId)) return report;
 
   const refreshedTables = new Map((await listTables(client)).map((table) => [table.name, table.table_id]));
   const actualPlanTableId = refreshedTables.get(TARGET_TABLE_NAMES.invoicePlan) || planTableId;
   const actualDetailTableId = refreshedTables.get(TARGET_TABLE_NAMES.invoiceDetail) || detailTableId;
+  const actualSupplierCostTableId = refreshedTables.get(TARGET_TABLE_NAMES.supplierCost) || supplierCostTableId;
   const actualOverviewFields = new Map((await listFields(client, projectOverviewId)).map((fieldItem) => [fieldItem.field_name, fieldItem]));
   const projectNoFieldId = actualOverviewFields.get('项目编号')?.field_id;
   const projectNameFieldId = actualOverviewFields.get('项目名称')?.field_id;
@@ -445,6 +506,7 @@ async function ensureInvoiceModel(client) {
 
   const planFields = new Map((await listFields(client, actualPlanTableId)).map((fieldItem) => [fieldItem.field_name, fieldItem]));
   const detailFields = new Map((await listFields(client, actualDetailTableId)).map((fieldItem) => [fieldItem.field_name, fieldItem]));
+  const supplierCostFields = new Map((await listFields(client, actualSupplierCostTableId)).map((fieldItem) => [fieldItem.field_name, fieldItem]));
 
   const planProjectLink = await ensureField(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, planFields, singleLink('关联项目', projectOverviewId, '关联项目总览表；项目编号、项目名称、项目分类管理从这里引用。'), report);
   await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, singleLink('关联项目', projectOverviewId, '关联项目总览表；项目编号、项目名称、项目分类管理从这里引用。'), report);
@@ -494,6 +556,36 @@ async function ensureInvoiceModel(client) {
   await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, text('备注'), report);
   await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, date('最后同步时间'), report);
 
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, text('成本唯一键'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, singleLink('关联项目', projectOverviewId), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, singleLink('关联PO', SOURCE_TABLES.po), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, singleLink('关联付款申请', SOURCE_TABLES.payment, '', true), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, text('项目编号'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, text('项目名称'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, text('立项公司'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, text('供应商'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, text('服务内容'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, text('PO申请编号'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, text('PO申请状态'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, date('PO申请时间'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, date('PO完成时间'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, number('PO成本金额'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, number('PO对客报价金额'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, number('PO利润'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, number('付款申请金额合计'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, number('实际付款金额合计'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, number('未付款金额'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, select('付款状态', SUPPLIER_PAYMENT_STATUS_OPTIONS), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, select('发票状态', SUPPLIER_INVOICE_STATUS_OPTIONS), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, text('付款申请编号汇总'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, date('最近付款申请日期'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, date('最近预计付款日期'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, date('最近实际付款日期'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, select('数据匹配状态', SUPPLIER_MATCH_STATUS_OPTIONS), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, text('异常原因'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, text('数据来源'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, date('最后同步时间'), report);
+
   await ensureField(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, planFields, singleLink('关联发票', actualDetailTableId, '脚本匹配到本计划期次的开票明细。', true), report);
   await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, singleLink('关联计划', actualPlanTableId, '脚本匹配到的项目开票计划期次。'), report);
 
@@ -524,12 +616,22 @@ async function ensureInvoiceModel(client) {
   }
 
   const finalPlanFields = new Map((await listFields(client, actualPlanTableId)).map((fieldItem) => [fieldItem.field_name, fieldItem]));
+  const finalSupplierCostFields = new Map((await listFields(client, actualSupplierCostTableId)).map((fieldItem) => [fieldItem.field_name, fieldItem]));
   await ensureFieldDescriptions(
     client,
     TARGET_TABLE_NAMES.invoicePlan,
     actualPlanTableId,
     finalPlanFields,
     INVOICE_PLAN_DESCRIPTIONS,
+    report,
+    { includeComputed: true },
+  );
+  await ensureFieldDescriptions(
+    client,
+    TARGET_TABLE_NAMES.supplierCost,
+    actualSupplierCostTableId,
+    finalSupplierCostFields,
+    SUPPLIER_COST_DESCRIPTIONS,
     report,
     { includeComputed: true },
   );
@@ -547,6 +649,13 @@ async function ensureInvoiceModel(client) {
     '金额异常待确认',
     '红冲待确认',
     '重复明细唯一键',
+  ], report);
+  await ensureViews(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, [
+    '按项目看供应商',
+    '未付款',
+    '未收票',
+    '付款未匹配PO',
+    '超额付款',
   ], report);
 
   return report;

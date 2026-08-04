@@ -181,7 +181,7 @@ function html() {
   </header>
   <main>
     <div class="toolbar">
-      <button class="primary" data-task="sync-all">同步项目和开票数据</button>
+      <button class="primary" data-task="sync-all">同步项目、开票和供应商数据</button>
       <button data-task="dry-run">试算不写入</button>
       <button data-task="verify">只核对</button>
       <button data-task="setup">检查表结构</button>
@@ -216,6 +216,8 @@ function html() {
       invoice_plan: '项目开票计划表',
       invoice_detail_plan_links: '开票明细关联计划',
       stale_invoice_details: '开票明细统一表（剔除旧明细）',
+      supplier_cost: '项目供应商成本表',
+      stale_supplier_costs: '项目供应商成本表（剔除旧成本）',
       project_overview: '项目总览表（汇总字段）',
       project_progress: '项目进度表',
     };
@@ -270,6 +272,8 @@ function html() {
       const reminders = [];
       if (Number(stats.amount_exception_plan_rows || 0) > 0) reminders.push('有 ' + stats.amount_exception_plan_rows + ' 条开票计划金额异常，需人工确认。');
       if (Number(stats.unmatched_invoice_rows || 0) > 0) reminders.push('有 ' + stats.unmatched_invoice_rows + ' 条发票未匹配项目、计划外开票或红冲待确认。');
+      if (Number(stats.supplier_cost_unmatched_payment_rows || 0) > 0) reminders.push('有 ' + stats.supplier_cost_unmatched_payment_rows + ' 条付款申请未匹配到 PO，需人工确认源_付款申请的关联po字段。');
+      if (Number(stats.supplier_cost_project_unmatched_rows || 0) > 0) reminders.push('有 ' + stats.supplier_cost_project_unmatched_rows + ' 条供应商成本未匹配项目总览表，需检查项目编号。');
       if (Number(stats.old_project_plan_skipped_rows || 0) > 0) reminders.push('旧项目补录表有 ' + stats.old_project_plan_skipped_rows + ' 条未生成计划，通常是项目编号、期次或金额不完整。');
       for (const failure of verify.failures || []) reminders.push(failure);
       if (!reminders.length) return '<div class="muted">没有发现需要人工处理的异常。</div>';
@@ -302,6 +306,10 @@ function html() {
         metric('金额异常', stats.amount_exception_plan_rows),
         metric('剔除旧明细', stats.stale_invoice_detail_rows),
         metric('新增进度项目', stats.project_progress_created_candidates),
+        metric('供应商成本', stats.supplier_cost_rows),
+        metric('供应商未付款', stats.supplier_cost_unpaid_rows),
+        metric('供应商未收票', stats.supplier_cost_uninvoiced_rows),
+        metric('付款未匹配PO', stats.supplier_cost_unmatched_payment_rows),
       ].join('');
       createdEl.innerHTML = listKeys(upsert, 'created_keys');
       updatedEl.innerHTML = listKeys(upsert, 'updated_keys');

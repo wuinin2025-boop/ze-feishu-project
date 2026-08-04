@@ -4,6 +4,8 @@ export const EXCLUDED_TEST_APPLICATION_NOS = new Set(['202607270006', '202607270
 
 export const SOURCE_TABLES = {
   establishment: 'tblQzxPCsapUDyux',
+  po: 'tblyvom6MSaaOvai',
+  payment: 'tblDbpQ0YIpPwvK6',
   projectLedgers: [
     { name: '源_集熠项目台账', company: '集熠', id: 'tblQA49eTNIxerfd' },
     { name: '源_冶堂项目台账', company: '冶堂', id: 'tblcHmatrhYBJS9H' },
@@ -21,6 +23,7 @@ export const TARGET_TABLE_NAMES = {
   projectProgress: '项目进度表',
   invoicePlan: '项目开票计划表',
   invoiceDetail: '开票明细统一表',
+  supplierCost: '项目供应商成本表',
   oldProjectPlan: '（旧项目）开票计划补录表',
   supplierPayment: '供应商付款',
 };

@@ -17,6 +17,13 @@ import {
 } from '../rules/invoice-progress-rules.mjs';
 import { changedUpdateFields } from '../rules/sync-diff-rules.mjs';
 import {
+  buildSupplierCostKey,
+  deriveSupplierInvoiceStatus,
+  deriveSupplierPaymentStatus,
+  extractApplicationNo,
+  supplierMatchStatus,
+} from '../rules/supplier-cost-rules.mjs';
+import {
   callJson,
   connectFeishu,
   numberValue,
@@ -144,9 +151,47 @@ const INVOICE_DETAIL_STALE_FIELDS = [
 
 const SUPPLIER_PAYMENT_FIELDS = [
   '项目编号',
+  '供应商',
   '付款金额',
   '付款状态',
   '实际付款金额',
+  '实际付款日期',
+  '关联PO',
+];
+
+const PO_APPLICATION_FIELDS = [
+  '申请编号',
+  '申请状态',
+  '发起时间',
+  '完成时间',
+  '项目编号1',
+  '项目名称1',
+  '该po对客报价金额',
+  '利润',
+  '立项公司1',
+  '服务内容1',
+  '金额1',
+  '供应商名称1',
+  'SourceID',
+];
+
+const PAYMENT_APPLICATION_FIELDS = [
+  '申请编号',
+  '申请状态',
+  '发起时间',
+  '完成时间',
+  '付款日期',
+  '关联po',
+  '项目编号1',
+  '项目名称1',
+  '供应商名称',
+  '金额1',
+  '发票情况',
+  'SourceID',
+];
+
+const SUPPLIER_COST_STALE_FIELDS = [
+  '成本唯一键',
 ];
 
 function assertWritableTarget(tableName) {
@@ -158,6 +203,19 @@ function assertWritableTarget(tableName) {
 function linkField(recordId, multiple = false) {
   if (!recordId) return undefined;
   return multiple ? [recordId].flat() : [recordId].flat();
+}
+
+function linkRecordIds(value) {
+  if (!value) return [];
+  const values = Array.isArray(value) ? value : [value];
+  return values.flatMap((item) => {
+    if (!item) return [];
+    if (typeof item === 'string') return [item];
+    if (Array.isArray(item.link_record_ids)) return item.link_record_ids;
+    if (Array.isArray(item.record_ids)) return item.record_ids;
+    if (item.record_id) return [item.record_id];
+    return [];
+  }).filter(Boolean);
 }
 
 function cleanFields(row) {
@@ -229,6 +287,7 @@ async function tableIdByName(client) {
     TARGET_TABLE_NAMES.projectProgress,
     TARGET_TABLE_NAMES.invoicePlan,
     TARGET_TABLE_NAMES.invoiceDetail,
+    TARGET_TABLE_NAMES.supplierCost,
   ]) {
     if (!result.has(name)) throw new Error(`Target table not found: ${name}. Run npm run setup:invoice-model first.`);
   }
@@ -320,6 +379,7 @@ async function upsertByKey(client, tableName, tableId, rows, keyField, options =
   const updates = [];
   const createdKeys = [];
   const updatedKeys = [];
+  const reportField = options.reportField || keyField;
   let skippedUnchanged = 0;
   for (const row of rows) {
     const key = textValue(row[keyField]);
@@ -329,14 +389,14 @@ async function upsertByKey(client, tableName, tableId, rows, keyField, options =
       const fields = changedUpdateFields(existing.fields || {}, row, options);
       if (Object.keys(fields).length) {
         updates.push({ record_id: existing.record_id, fields });
-        updatedKeys.push(key);
+        updatedKeys.push(textValue(row[reportField]) || key);
       } else {
         skippedUnchanged += 1;
       }
     } else {
       const fields = cleanUpdateFields(row);
       creates.push(fields);
-      createdKeys.push(key);
+      createdKeys.push(textValue(row[reportField]) || key);
     }
   }
   return {
@@ -574,9 +634,51 @@ function normalizeSupplierPayment(record) {
   const fields = record.fields || {};
   return {
     projectNo: textValue(fields['项目编号']),
+    supplierName: textValue(fields['供应商']),
     paymentAmount: numberValue(fields['付款金额']) || 0,
     actualPaymentAmount: numberValue(fields['实际付款金额']) || 0,
+    actualPaymentDate: timestampValue(fields['实际付款日期']),
     paymentStatus: textValue(fields['付款状态']),
+    linkedPoRecordIds: linkRecordIds(fields['关联PO']),
+  };
+}
+
+function normalizePoApplication(record) {
+  const fields = record.fields || {};
+  return {
+    recordId: record.record_id,
+    sourceId: textValue(fields.SourceID) || record.record_id,
+    applicationNo: extractApplicationNo(textValue(fields['申请编号'])),
+    applicationStatus: textValue(fields['申请状态']),
+    startedAt: timestampValue(fields['发起时间']),
+    completedAt: timestampValue(fields['完成时间']),
+    projectNo: textValue(fields['项目编号1']),
+    projectName: textValue(fields['项目名称1']),
+    quotedAmount: numberValue(fields['该po对客报价金额']) || 0,
+    profitAmount: numberValue(fields['利润']) || 0,
+    companyName: textValue(fields['立项公司1']),
+    serviceContent: textValue(fields['服务内容1']),
+    costAmount: numberValue(fields['金额1']) || 0,
+    supplierName: textValue(fields['供应商名称1']),
+  };
+}
+
+function normalizePaymentApplication(record) {
+  const fields = record.fields || {};
+  return {
+    recordId: record.record_id,
+    sourceId: textValue(fields.SourceID) || record.record_id,
+    applicationNo: extractApplicationNo(textValue(fields['申请编号'])),
+    applicationStatus: textValue(fields['申请状态']),
+    startedAt: timestampValue(fields['发起时间']),
+    completedAt: timestampValue(fields['完成时间']),
+    expectedPaymentDate: timestampValue(fields['付款日期']),
+    linkedPoApplicationNo: extractApplicationNo(textValue(fields['关联po'])),
+    projectNo: textValue(fields['项目编号1']),
+    projectName: textValue(fields['项目名称1']),
+    supplierName: textValue(fields['供应商名称']),
+    amount: numberValue(fields['金额1']) || 0,
+    invoiceStatus: textValue(fields['发票情况']),
   };
 }
 
@@ -811,6 +913,169 @@ function attachProjectPayments(projects, payments) {
   }));
 }
 
+function maxTimestamp(values) {
+  const timestamps = values.filter((value) => typeof value === 'number' && value > 0);
+  return timestamps.length ? Math.max(...timestamps) : undefined;
+}
+
+function sumAmounts(rows, fieldName) {
+  return Number(rows.reduce((sum, row) => sum + Number(row[fieldName] || 0), 0).toFixed(2));
+}
+
+function groupPaymentApplicationsByPo(paymentApplications, poByApplicationNo) {
+  const byPoRecordId = new Map();
+  const unmatched = [];
+  for (const payment of paymentApplications) {
+    const po = poByApplicationNo.get(payment.linkedPoApplicationNo);
+    if (!po) {
+      unmatched.push(payment);
+      continue;
+    }
+    addToMap(byPoRecordId, po.recordId, payment);
+  }
+  return { byPoRecordId, unmatched };
+}
+
+function actualPaymentsByPo(supplierPayments) {
+  const result = new Map();
+  for (const payment of supplierPayments) {
+    for (const poRecordId of payment.linkedPoRecordIds || []) {
+      const current = result.get(poRecordId) || {
+        amount: 0,
+        dates: [],
+      };
+      current.amount += Number(payment.actualPaymentAmount || 0);
+      if (payment.actualPaymentDate) current.dates.push(payment.actualPaymentDate);
+      result.set(poRecordId, current);
+    }
+  }
+  for (const current of result.values()) {
+    current.amount = Number(current.amount.toFixed(2));
+  }
+  return result;
+}
+
+function supplierCostExceptionReasons({
+  matchStatus,
+  paymentStatus,
+  poStatus,
+}) {
+  const reasons = [];
+  if (matchStatus === '项目未匹配') reasons.push('项目编号未匹配项目总览表');
+  if (matchStatus === '付款未匹配PO') reasons.push('付款申请未匹配到源_PO申请');
+  if (paymentStatus === '超额付款') reasons.push('实际付款超过PO成本');
+  if (poStatus && poStatus !== '已通过') reasons.push('PO申请未通过');
+  return reasons.join('；');
+}
+
+function buildSupplierCostRows({ poApplications, paymentApplications, supplierPayments, projectOverviewRows }) {
+  const projectByNo = new Map(projectOverviewRows
+    .filter((project) => project.projectNo)
+    .map((project) => [project.projectNo, project]));
+  const poByApplicationNo = new Map(poApplications
+    .filter((po) => po.applicationNo)
+    .map((po) => [po.applicationNo, po]));
+  const paymentGroups = groupPaymentApplicationsByPo(paymentApplications, poByApplicationNo);
+  const actualGroups = actualPaymentsByPo(supplierPayments);
+  const rows = [];
+
+  for (const po of poApplications) {
+    const payments = paymentGroups.byPoRecordId.get(po.recordId) || [];
+    const actual = actualGroups.get(po.recordId) || { amount: 0, dates: [] };
+    const project = projectByNo.get(po.projectNo);
+    const appliedPaymentAmount = sumAmounts(payments, 'amount');
+    const actualPaymentAmount = Number(actual.amount || 0);
+    const paymentStatus = deriveSupplierPaymentStatus({
+      poStatus: po.applicationStatus,
+      poAmount: po.costAmount,
+      appliedPaymentAmount,
+      actualPaymentAmount,
+    });
+    const invoiceStatus = deriveSupplierInvoiceStatus(payments.map((payment) => payment.invoiceStatus));
+    const matchStatus = supplierMatchStatus({
+      projectRecordId: project?.recordId,
+      paymentRecordIds: payments.map((payment) => payment.recordId),
+    });
+    const key = buildSupplierCostKey({ poSourceId: po.sourceId, poRecordId: po.recordId });
+    const titleParts = [po.projectNo || '项目未匹配', po.supplierName || '供应商未填', po.applicationNo || po.recordId].filter(Boolean);
+    rows.push({
+      '成本记录标题': titleParts.join('-'),
+      '成本唯一键': key,
+      '关联项目': linkField(project?.recordId),
+      '关联PO': linkField(po.recordId),
+      '关联付款申请': payments.length ? linkField(payments.map((payment) => payment.recordId), true) : [],
+      '项目编号': po.projectNo,
+      '项目名称': po.projectName,
+      '立项公司': po.companyName,
+      '供应商': po.supplierName,
+      '服务内容': po.serviceContent,
+      'PO申请编号': po.applicationNo,
+      'PO申请状态': po.applicationStatus,
+      'PO申请时间': po.startedAt,
+      'PO完成时间': po.completedAt,
+      'PO成本金额': po.costAmount,
+      'PO对客报价金额': po.quotedAmount,
+      'PO利润': po.profitAmount,
+      '付款申请金额合计': appliedPaymentAmount,
+      '实际付款金额合计': actualPaymentAmount,
+      '未付款金额': Math.max(Number((Number(po.costAmount || 0) - actualPaymentAmount).toFixed(2)), 0),
+      '付款状态': paymentStatus,
+      '发票状态': invoiceStatus,
+      '付款申请编号汇总': [...new Set(payments.map((payment) => payment.applicationNo).filter(Boolean))].join('、'),
+      '最近付款申请日期': maxTimestamp(payments.map((payment) => payment.startedAt)),
+      '最近预计付款日期': maxTimestamp(payments.map((payment) => payment.expectedPaymentDate)),
+      '最近实际付款日期': maxTimestamp(actual.dates),
+      '数据匹配状态': matchStatus,
+      '异常原因': supplierCostExceptionReasons({ matchStatus, paymentStatus, poStatus: po.applicationStatus }),
+      '数据来源': '源_PO申请、源_付款申请、供应商付款',
+      '最后同步时间': NOW,
+    });
+  }
+
+  for (const payment of paymentGroups.unmatched) {
+    const project = projectByNo.get(payment.projectNo);
+    const matchStatus = supplierMatchStatus({ unmatchedPayment: true });
+    const paymentStatus = deriveSupplierPaymentStatus({
+      poStatus: '已通过',
+      poAmount: 0,
+      appliedPaymentAmount: payment.amount,
+      actualPaymentAmount: 0,
+    });
+    rows.push({
+      '成本记录标题': [payment.projectNo || '项目未匹配', payment.supplierName || '供应商未填', payment.applicationNo || payment.recordId].filter(Boolean).join('-'),
+      '成本唯一键': buildSupplierCostKey({ paymentSourceId: payment.sourceId, paymentRecordId: payment.recordId }),
+      '关联项目': linkField(project?.recordId),
+      '关联付款申请': linkField(payment.recordId),
+      '项目编号': payment.projectNo,
+      '项目名称': payment.projectName,
+      '供应商': payment.supplierName,
+      '付款申请金额合计': payment.amount,
+      '实际付款金额合计': 0,
+      '未付款金额': 0,
+      '付款状态': paymentStatus,
+      '发票状态': deriveSupplierInvoiceStatus([payment.invoiceStatus]),
+      '付款申请编号汇总': payment.applicationNo,
+      '最近付款申请日期': payment.startedAt,
+      '最近预计付款日期': payment.expectedPaymentDate,
+      '数据匹配状态': matchStatus,
+      '异常原因': supplierCostExceptionReasons({ matchStatus, paymentStatus, poStatus: '' }),
+      '数据来源': '源_付款申请',
+      '最后同步时间': NOW,
+    });
+  }
+
+  return rows;
+}
+
+function staleSupplierCostRecordIds(existingRows, currentRows) {
+  const currentKeys = new Set(currentRows.map((row) => textValue(row['成本唯一键'])).filter(Boolean));
+  return existingRows.flatMap((row) => {
+    const key = textValue(row.fields?.['成本唯一键']);
+    if (!key || currentKeys.has(key)) return [];
+    return [row.record_id];
+  });
+}
+
 function buildProjectProgressCreateRows(projects, progressRows) {
   const existingProjectNos = new Set(progressRows.map((row) => row.projectNo).filter(Boolean));
   const rows = [];
@@ -858,6 +1123,8 @@ try {
     oldProjectPlanRecords,
     supplierPaymentRecords,
     projectProgressRecords,
+    poApplicationRecords,
+    paymentApplicationRecords,
     projectLedgerGroups,
     ...invoiceSources
   ] = await Promise.all([
@@ -866,6 +1133,8 @@ try {
     oldProjectPlanTableId ? searchAll(client, APP_TOKEN, oldProjectPlanTableId, OLD_PROJECT_PLAN_FIELDS) : [],
     supplierPaymentTableId ? searchAll(client, APP_TOKEN, supplierPaymentTableId, SUPPLIER_PAYMENT_FIELDS) : [],
     searchAll(client, APP_TOKEN, tableIds.get(TARGET_TABLE_NAMES.projectProgress), PROJECT_PROGRESS_FIELDS),
+    searchAll(client, APP_TOKEN, SOURCE_TABLES.po, PO_APPLICATION_FIELDS),
+    searchAll(client, APP_TOKEN, SOURCE_TABLES.payment, PAYMENT_APPLICATION_FIELDS),
     Promise.all(SOURCE_TABLES.projectLedgers.map((source) => searchAll(client, APP_TOKEN, source.id)
       .then((records) => records.map((record) => normalizeLedgerProject(source, record))))),
     ...SOURCE_TABLES.invoices.map((source) => searchAll(client, APP_TOKEN, source.id, INVOICE_FIELDS)
@@ -893,6 +1162,8 @@ try {
     ? existingProjectOverviewRecords
     : await searchAll(client, APP_TOKEN, tableIds.get(TARGET_TABLE_NAMES.projectOverview), PROJECT_OVERVIEW_FIELDS);
   const supplierPayments = supplierPaymentRecords.map(normalizeSupplierPayment);
+  const poApplications = poApplicationRecords.map(normalizePoApplication);
+  const paymentApplications = paymentApplicationRecords.map(normalizePaymentApplication);
   const projectProgressRows = projectProgressRecords.map(normalizeProjectProgress);
   const projectOverviewRows = attachProjectRisks(
     attachProjectPayments(projectOverviewRecords.map(normalizeProjectOverview), supplierPayments),
@@ -904,6 +1175,49 @@ try {
     tableIds.get(TARGET_TABLE_NAMES.projectProgress),
     projectProgressCreateRows,
   );
+
+  const supplierCostRows = buildSupplierCostRows({
+    poApplications,
+    paymentApplications,
+    supplierPayments,
+    projectOverviewRows,
+  });
+  const supplierCostResult = await upsertByKey(
+    client,
+    TARGET_TABLE_NAMES.supplierCost,
+    tableIds.get(TARGET_TABLE_NAMES.supplierCost),
+    supplierCostRows,
+    '成本唯一键',
+    {
+      clearableFields: [
+        '关联项目',
+        '关联PO',
+        '关联付款申请',
+        'PO申请时间',
+        'PO完成时间',
+        '付款申请编号汇总',
+        '最近付款申请日期',
+        '最近预计付款日期',
+        '最近实际付款日期',
+        '异常原因',
+      ],
+      reportField: '成本记录标题',
+    },
+  );
+  const existingSupplierCostRows = await searchAll(
+    client,
+    APP_TOKEN,
+    tableIds.get(TARGET_TABLE_NAMES.supplierCost),
+    SUPPLIER_COST_STALE_FIELDS,
+  );
+  const staleSupplierCostIds = staleSupplierCostRecordIds(existingSupplierCostRows, supplierCostRows);
+  const staleSupplierCosts = await batchDelete(
+    client,
+    TARGET_TABLE_NAMES.supplierCost,
+    tableIds.get(TARGET_TABLE_NAMES.supplierCost),
+    staleSupplierCostIds,
+  );
+
   const { plans, invoices } = attachProjects(
     mergePlanRows(sourcePlans.rows, manualOldPlans.rows),
     invoiceSources.flat(),
@@ -997,6 +1311,12 @@ try {
       offset_invoice_rows: matched.invoices.filter((invoice) => invoice.offsetStatus === '已抵消').length,
       unmatched_invoice_rows: matched.invoices.filter((invoice) => ['未匹配项目', '计划外开票', '红冲待确认'].includes(invoice.matchStatus)).length,
       amount_exception_plan_rows: matched.plans.filter((plan) => plan.matchStatus === '金额异常待确认').length,
+      supplier_cost_rows: supplierCostRows.length,
+      supplier_cost_unmatched_payment_rows: supplierCostRows.filter((row) => row['数据匹配状态'] === '付款未匹配PO').length,
+      supplier_cost_project_unmatched_rows: supplierCostRows.filter((row) => row['数据匹配状态'] === '项目未匹配').length,
+      supplier_cost_unpaid_rows: supplierCostRows.filter((row) => ['未申请付款', '已申请待付款', '部分付款'].includes(row['付款状态'])).length,
+      supplier_cost_uninvoiced_rows: supplierCostRows.filter((row) => ['未收票', '部分收票'].includes(row['发票状态'])).length,
+      stale_supplier_cost_rows: staleSupplierCostIds.length,
       project_overview_updates: projectOverviewUpdates.length,
       project_overview_unchanged_rows: projectOverviewChanges.skipped.length,
       project_progress_created_candidates: projectProgressCreateRows.length,
@@ -1008,6 +1328,14 @@ try {
       project_overview_sources: projectOverviewResult,
       invoice_detail: invoiceResult,
       invoice_plan: planResult,
+      supplier_cost: supplierCostResult,
+      stale_supplier_costs: {
+        planned: staleSupplierCostIds.length,
+        deleted: staleSupplierCosts,
+        deleted_key_count: staleSupplierCostIds.length,
+        key_display_limit: REPORT_KEY_LIMIT,
+        deleted_keys: staleSupplierCostIds.slice(0, REPORT_KEY_LIMIT),
+      },
       invoice_detail_plan_links: {
         planned: plannedDetailPlanLinkUpdates.length,
         updated: linkedDetails,
