@@ -179,12 +179,12 @@ const INVOICE_PLAN_DESCRIPTIONS = {
   计划开票金额: '本地同步写入本期计划开票金额；用于计算未开票金额、匹配状态、开票逾期和项目总览表计划开票总金额。',
   计划开票日期: '本地同步写入本期约定开票日期；用于判断即将到期开票和开票逾期天数。',
   预计回款日期: '本地同步写入本期预计回款日期；已开票未收齐时，用于判断回款逾期和回款逾期天数。',
-  匹配状态: '本地同步计算：无发票为待匹配；部分开票为部分匹配；实际开票达到计划为已匹配；实际开票超过计划为金额异常待确认。',
+  匹配状态: '本地同步计算：无发票为待匹配；部分开票为部分匹配；实际开票达到计划为已匹配；实际开票超过计划为金额异常待确认。一张发票金额刚好覆盖连续多期时会按期拆分匹配。',
   开票状态: '本地同步计算：缺少计划日期或金额为待人工补充；实际开票达到计划为已开票；部分开票为部分开票；未开票且日期已过为开票逾期；7天内到期为即将到期开票；否则未到期。',
   回款状态: '本地同步计算：未开票为待开票；已收款达到实际开票金额为已回款；已开票但未填预计回款日期为待补预计回款日期；预计回款日期已过且未收齐为回款逾期；部分收款为部分回款；否则待回款。',
   发票编号: '本地同步按关联发票汇总发票编号显示值；一期开多张发票时用顿号合并。Hankook & Company Co., Ltd 无发票号时显示 Hankook 001。',
-  实际开票金额: '本地同步按自动匹配到本计划期次的开票明细汇总开票金额；红冲抵消记录不纳入。',
-  实际收款金额: '本地同步按自动匹配到本计划期次的开票明细汇总收款金额；红冲抵消记录不纳入。',
+  实际开票金额: '本地同步按自动匹配到本计划期次的开票明细汇总开票金额；一张发票覆盖连续多期时按计划金额拆分到各期；红冲抵消记录不纳入。',
+  实际收款金额: '本地同步按自动匹配到本计划期次的开票明细汇总收款金额；一张发票覆盖连续多期时按开票金额比例拆分收款；红冲抵消记录不纳入。',
   实际开票日期: '本地同步取本计划期次最早匹配发票的开票日期。',
   实际收款日期: '本地同步取本计划期次匹配发票中的收款日期；多张发票时取最近一次有值的收款日期。',
   未开票金额: '本地同步计算：计划开票金额减实际开票金额，小于0时按0显示。',
@@ -195,7 +195,7 @@ const INVOICE_PLAN_DESCRIPTIONS = {
   异常原因: '本地同步写入需要人工确认的原因；目前主要用于实际开票金额超过计划开票金额。',
   数据来源: '本地同步写入计划来源：旧项目开票计划补录或源立项开票计划。',
   最后同步时间: '本地同步本次实际改动本计划记录时写入；如果本次计算结果没有变化，会清空该字段，避免误认为数据发生变化。',
-  关联发票: '本地同步关联自动匹配到本计划期次的开票明细统一表记录；用于回看实际发票和收款明细。',
+  关联发票: '本地同步关联自动匹配到本计划期次的开票明细统一表记录；一张发票覆盖连续多期时，多期会关联同一张发票。',
 };
 
 const SUPPLIER_COST_DESCRIPTIONS = {
@@ -587,7 +587,7 @@ async function ensureInvoiceModel(client) {
   await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, date('最后同步时间'), report);
 
   await ensureField(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, planFields, singleLink('关联发票', actualDetailTableId, '脚本匹配到本计划期次的开票明细。', true), report);
-  await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, singleLink('关联计划', actualPlanTableId, '脚本匹配到的项目开票计划期次。'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, singleLink('关联计划', actualPlanTableId, '脚本匹配到的项目开票计划期次；一张发票覆盖多期时，项目开票计划表会按期次拆分金额，明细表此字段保留首个匹配期次。', true), report);
 
   const latestPlanFields = new Map((await listFields(client, actualPlanTableId)).map((fieldItem) => [fieldItem.field_name, fieldItem]));
   const latestDetailFields = new Map((await listFields(client, actualDetailTableId)).map((fieldItem) => [fieldItem.field_name, fieldItem]));

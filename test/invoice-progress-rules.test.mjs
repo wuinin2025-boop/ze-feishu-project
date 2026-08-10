@@ -205,6 +205,37 @@ test('invoice matching assigns amount mismatch to earliest unfinished period', (
   assert.equal(result.plans[1].matchStatus, '待匹配');
 });
 
+test('invoice matching splits exact multi-period invoice across consecutive plans', () => {
+  const today = Date.UTC(2026, 6, 31);
+  const result = matchInvoicesToPlans([
+    { projectNo: 'P1', period: 1, planAmount: 70000, planDate: Date.UTC(2026, 0, 1), expectedPaymentDate: Date.UTC(2026, 1, 1) },
+    { projectNo: 'P1', period: 2, planAmount: 70000, planDate: Date.UTC(2026, 1, 1), expectedPaymentDate: Date.UTC(2026, 2, 1) },
+    { projectNo: 'P1', period: 3, planAmount: 70000, planDate: Date.UTC(2026, 2, 1), expectedPaymentDate: Date.UTC(2026, 3, 1) },
+    { projectNo: 'P1', period: 4, planAmount: 70000, planDate: Date.UTC(2026, 3, 1), expectedPaymentDate: Date.UTC(2026, 4, 1) },
+  ], [
+    {
+      sourceName: '集熠开票明细',
+      sourceId: 'rec1',
+      projectNo: 'P1',
+      invoiceNo: 'F1',
+      invoiceAmount: 210000,
+      receivedAmount: 140000,
+      invoiceDate: Date.UTC(2026, 2, 15),
+    },
+  ], { today });
+
+  assert.deepEqual(result.invoices[0].linkedPlanKeys, ['P1-1', 'P1-2', 'P1-3']);
+  assert.equal(result.invoices[0].linkedPlanKey, 'P1-1');
+  assert.deepEqual(result.plans.map((plan) => plan.actualInvoiceAmount), [70000, 70000, 70000, 0]);
+  assert.deepEqual(result.plans.map((plan) => plan.receivedAmount), [46666.67, 46666.67, 46666.66, 0]);
+  assert.deepEqual(result.plans.map((plan) => plan.matchStatus), ['已匹配', '已匹配', '已匹配', '待匹配']);
+  assert.deepEqual(result.plans.slice(0, 3).map((plan) => plan.linkedInvoiceKeys), [
+    ['集熠开票明细|F1'],
+    ['集熠开票明细|F1'],
+    ['集熠开票明细|F1'],
+  ]);
+});
+
 test('offset invoices are excluded before matching', () => {
   const result = matchInvoicesToPlans([
     { projectNo: 'P1', period: 1, planAmount: 14000 },

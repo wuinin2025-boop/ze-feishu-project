@@ -858,12 +858,16 @@ function buildPlanRows(plans, detailRecordIdsByKey, invoicesByKey) {
 function buildInvoicePlanLinkUpdates(matchedInvoices, detailRecordIdsByKey, planRecordIdsByKey) {
   return matchedInvoices.flatMap((invoice) => {
     const detailRecordId = detailRecordIdsByKey.get(invoice.detailKey);
-    const planRecordId = invoice.linkedPlanKey ? planRecordIdsByKey.get(invoice.linkedPlanKey) : undefined;
+    const linkedPlanKeys = invoice.linkedPlanKeys?.length ? invoice.linkedPlanKeys : [invoice.linkedPlanKey].filter(Boolean);
+    const planRecordIds = linkedPlanKeys
+      .map((planKey) => planRecordIdsByKey.get(planKey))
+      .filter(Boolean);
     if (!detailRecordId) return [];
+    const firstPlanRecordId = planRecordIds[0];
     return [{
       record_id: detailRecordId,
       fields: {
-        '关联计划': planRecordId ? linkField(planRecordId) : [],
+        '关联计划': firstPlanRecordId ? linkField(firstPlanRecordId) : [],
         '匹配状态': invoice.matchStatus,
       },
     }];

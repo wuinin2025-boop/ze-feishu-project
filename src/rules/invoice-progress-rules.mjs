@@ -5,6 +5,7 @@ const HANKOOK_CUSTOMER_NAME = 'Hankook & Company Co., Ltd';
 const HANKOOK_DISPLAY_INVOICE_NO = 'Hankook 001';
 const THIRTY_DAYS_MS = DAY_MS * 30;
 const MANUAL_PROJECT_STATUSES = new Set(['暂停', '暂缓', '已终止', '已取消']);
+const AMOUNT_TOLERANCE = 0.01;
 
 export function classifyApplication(applicationNo) {
   const value = String(applicationNo || '').trim();
@@ -276,7 +277,42 @@ export function matchInvoicesToPlans(plans, invoices, { today = Date.now() } = {
   const planByKey = new Map(matchedPlans.map((plan) => [plan.planKey, plan]));
   const matchedInvoices = markOffsetInvoices(invoices)
     .sort((left, right) => (left.invoiceDate || 0) - (right.invoiceDate || 0))
-    .map((invoice) => ({ ...invoice, matchStatus: '待匹配', linkedPlanKey: '' }));
+    .map((invoice) => ({ ...invoice, matchStatus: '待匹配', linkedPlanKey: '', linkedPlanKeys: [] }));
+
+  function unfinishedPlansForInvoice(invoice) {
+    return matchedPlans.filter((plan) => (
+      plan.projectNo === invoice.projectNo
+      && Number(plan.planAmount || 0) > 0
+      && plan.actualInvoiceAmount < Number(plan.planAmount || 0) - AMOUNT_TOLERANCE
+    ));
+  }
+
+  function exactSplitAllocations(invoice, candidates) {
+    const invoiceAmount = Number(invoice.invoiceAmount || 0);
+    if (invoiceAmount <= 0) return [];
+    let remaining = invoiceAmount;
+    const allocations = [];
+    for (const plan of candidates) {
+      const capacity = Number((Number(plan.planAmount || 0) - Number(plan.actualInvoiceAmount || 0)).toFixed(2));
+      if (capacity <= AMOUNT_TOLERANCE) continue;
+      if (remaining + AMOUNT_TOLERANCE < capacity) break;
+      allocations.push({ plan, amount: capacity });
+      remaining = Number((remaining - capacity).toFixed(2));
+      if (Math.abs(remaining) <= AMOUNT_TOLERANCE) return allocations;
+    }
+    return [];
+  }
+
+  function applyInvoiceAllocation(invoice, plan, amount, receivedShare = Number(invoice.receivedAmount || 0)) {
+    const invoiceKey = invoice.detailKey || buildInvoiceDetailKey(invoice);
+    plan.linkedInvoiceKeys.push(invoiceKey);
+    plan.actualInvoiceAmount = Number((Number(plan.actualInvoiceAmount || 0) + amount).toFixed(2));
+    plan.receivedAmount = Number((Number(plan.receivedAmount || 0) + receivedShare).toFixed(2));
+    plan.actualInvoiceDate = plan.actualInvoiceDate || invoice.invoiceDate;
+    plan.paymentDate = invoice.paymentDate || plan.paymentDate;
+    invoice.linkedPlanKeys.push(plan.planKey);
+    invoice.linkedPlanKey = invoice.linkedPlanKey || plan.planKey;
+  }
 
   for (const invoice of matchedInvoices) {
     if (!invoice.includedInStats) {
@@ -287,32 +323,41 @@ export function matchInvoicesToPlans(plans, invoices, { today = Date.now() } = {
       invoice.matchStatus = '未匹配项目';
       continue;
     }
-    const target = matchedPlans.find((plan) => (
-      plan.projectNo === invoice.projectNo
-      && plan.actualInvoiceAmount < Number(plan.planAmount || 0) - 0.01
-    ));
+    const candidates = unfinishedPlansForInvoice(invoice);
+    const splitAllocations = exactSplitAllocations(invoice, candidates);
+    if (splitAllocations.length) {
+      const invoiceAmount = Number(invoice.invoiceAmount || 0);
+      const invoiceReceivedAmount = Number(invoice.receivedAmount || 0);
+      let remainingReceivedAmount = invoiceReceivedAmount;
+      for (const [index, allocation] of splitAllocations.entries()) {
+        const receivedShare = index === splitAllocations.length - 1
+          ? Number(remainingReceivedAmount.toFixed(2))
+          : Number(((invoiceReceivedAmount * allocation.amount) / invoiceAmount).toFixed(2));
+        remainingReceivedAmount = Number((remainingReceivedAmount - receivedShare).toFixed(2));
+        applyInvoiceAllocation(invoice, allocation.plan, allocation.amount, receivedShare);
+      }
+      invoice.matchStatus = '自动匹配';
+      continue;
+    }
+
+    const target = candidates[0];
     if (!target) {
       invoice.matchStatus = '计划外开票';
       continue;
     }
 
-    invoice.linkedPlanKey = target.planKey;
-    target.linkedInvoiceKeys.push(invoice.detailKey || buildInvoiceDetailKey(invoice));
-    target.actualInvoiceAmount += Number(invoice.invoiceAmount || 0);
-    target.receivedAmount += Number(invoice.receivedAmount || 0);
-    target.actualInvoiceDate = target.actualInvoiceDate || invoice.invoiceDate;
-    target.paymentDate = invoice.paymentDate || target.paymentDate;
+    applyInvoiceAllocation(invoice, target, Number(invoice.invoiceAmount || 0));
     invoice.matchStatus = '自动匹配';
   }
 
   for (const plan of matchedPlans) {
     const planAmount = Number(plan.planAmount || 0);
     const actualAmount = Number(plan.actualInvoiceAmount || 0);
-    if (actualAmount > planAmount + 0.01) {
+    if (actualAmount > planAmount + AMOUNT_TOLERANCE) {
       plan.matchStatus = '金额异常待确认';
       plan.diffStatus = '金额异常待确认';
     } else if (actualAmount > 0) {
-      plan.matchStatus = actualAmount >= planAmount - 0.01 ? '已匹配' : '部分匹配';
+      plan.matchStatus = actualAmount >= planAmount - AMOUNT_TOLERANCE ? '已匹配' : '部分匹配';
     }
     plan.invoiceStatus = deriveInvoiceStatus({
       planDate: plan.planDate,
