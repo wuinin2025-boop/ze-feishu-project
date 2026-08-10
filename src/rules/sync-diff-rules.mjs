@@ -1,5 +1,5 @@
-const LAST_SYNC_FIELD = '最后同步时间';
-const TIME_ONLY_FIELDS = new Set([LAST_SYNC_FIELD, '源更新时间']);
+const LAST_SYNC_FIELDS = ['最后同步时间', '最近同步时间'];
+const TIME_ONLY_FIELDS = new Set([...LAST_SYNC_FIELDS, '源更新时间']);
 
 function cleanUpdateFieldsWithClears(row, clearableFields = []) {
   const clearable = new Set(clearableFields);
@@ -62,17 +62,20 @@ export function changedUpdateFields(existingFields, nextFields, options = {}) {
   const changedEntries = Object.entries(fields)
     .filter(([fieldName, value]) => !TIME_ONLY_FIELDS.has(fieldName) && fieldChanged(existingFields, fieldName, value));
   if (!changedEntries.length) {
-    if (
-      clearUnchangedLastSync
-      && Object.hasOwn(fields, LAST_SYNC_FIELD)
-      && comparableFieldValue(existingFields?.[LAST_SYNC_FIELD])
-    ) {
-      return { [LAST_SYNC_FIELD]: null };
+    if (clearUnchangedLastSync) {
+      return Object.fromEntries(LAST_SYNC_FIELDS
+        .filter((fieldName) => (
+          Object.hasOwn(fields, fieldName)
+          && comparableFieldValue(existingFields?.[fieldName])
+        ))
+        .map((fieldName) => [fieldName, null]));
     }
     return {};
   }
   const changed = Object.fromEntries(changedEntries);
-  if (Object.hasOwn(fields, LAST_SYNC_FIELD)) changed[LAST_SYNC_FIELD] = fields[LAST_SYNC_FIELD];
+  for (const fieldName of LAST_SYNC_FIELDS) {
+    if (Object.hasOwn(fields, fieldName)) changed[fieldName] = fields[fieldName];
+  }
   if (Object.hasOwn(fields, '源更新时间')) changed['源更新时间'] = fields['源更新时间'];
   return changed;
 }
