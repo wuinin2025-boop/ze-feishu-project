@@ -86,6 +86,7 @@ npm run control
 
 - `docs/feishu-automation-setup.md`
 - `docs/supplier-cost-table.md`
+- `docs/scheduled-sync.md`
 
 ## 开票明细是否自动更新
 
