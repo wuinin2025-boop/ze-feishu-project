@@ -9,18 +9,16 @@ test('unchanged rows clear stale last sync time only', () => {
       项目编号: 'P1',
       项目名称: '测试项目',
       最后同步时间: Date.UTC(2026, 7, 3),
-      最近同步时间: Date.UTC(2026, 7, 3, 10, 30),
     },
     {
       项目编号: 'P1',
       项目名称: '测试项目',
       源更新时间: Date.UTC(2026, 7, 4),
       最后同步时间: Date.UTC(2026, 7, 4),
-      最近同步时间: Date.UTC(2026, 7, 4, 9, 15),
     },
   );
 
-  assert.deepEqual(result, { 最后同步时间: null, 最近同步时间: null });
+  assert.deepEqual(result, { 最后同步时间: null });
 });
 
 test('unchanged rows skip write after last sync time is already empty', () => {
@@ -34,7 +32,6 @@ test('unchanged rows skip write after last sync time is already empty', () => {
       项目名称: '测试项目',
       源更新时间: Date.UTC(2026, 7, 4),
       最后同步时间: Date.UTC(2026, 7, 4),
-      最近同步时间: Date.UTC(2026, 7, 4, 9, 15),
     },
   );
 
@@ -48,14 +45,12 @@ test('changed rows include business changes and sync timestamps', () => {
       项目编号: 'P1',
       项目名称: '旧名称',
       最后同步时间: Date.UTC(2026, 7, 3),
-      最近同步时间: Date.UTC(2026, 7, 3, 10, 30),
     },
     {
       项目编号: 'P1',
       项目名称: '新名称',
       源更新时间: today,
       最后同步时间: today,
-      最近同步时间: today,
     },
   );
 
@@ -63,7 +58,6 @@ test('changed rows include business changes and sync timestamps', () => {
     项目名称: '新名称',
     源更新时间: today,
     最后同步时间: today,
-    最近同步时间: today,
   });
 });
 
@@ -81,7 +75,6 @@ test('create-only people fields are not overwritten on existing records', () => 
       项目参与人员: [{ id: 'source_member' }],
       源更新时间: today,
       最后同步时间: today,
-      最近同步时间: today,
     },
     { createOnlyFields: ['当前项目负责人', '项目参与人员'] },
   );

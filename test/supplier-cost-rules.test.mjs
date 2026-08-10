@@ -6,6 +6,8 @@ import {
   deriveSupplierInvoiceStatus,
   deriveSupplierPaymentStatus,
   extractApplicationNo,
+  isApprovedApplication,
+  shouldIncludePaymentApplication,
   supplierMatchStatus,
 } from '../src/rules/supplier-cost-rules.mjs';
 
@@ -25,7 +27,6 @@ test('derives supplier payment status from PO and actual payment amounts', () =>
   assert.equal(deriveSupplierPaymentStatus({ poStatus: '已通过', poAmount: 1000, appliedPaymentAmount: 1000, actualPaymentAmount: 400 }), '部分付款');
   assert.equal(deriveSupplierPaymentStatus({ poStatus: '已通过', poAmount: 1000, appliedPaymentAmount: 1000, actualPaymentAmount: 1000 }), '已付款');
   assert.equal(deriveSupplierPaymentStatus({ poStatus: '已通过', poAmount: 1000, appliedPaymentAmount: 1000, actualPaymentAmount: 1200 }), '超额付款');
-  assert.equal(deriveSupplierPaymentStatus({ poStatus: '审批中', poAmount: 1000 }), 'PO未通过');
 });
 
 test('derives supplier invoice status from payment application invoice flags', () => {
@@ -41,4 +42,22 @@ test('derives supplier match status', () => {
   assert.equal(supplierMatchStatus({ projectRecordId: 'rec1', paymentRecordIds: [] }), '已匹配项目未匹配付款');
   assert.equal(supplierMatchStatus({ projectRecordId: '', paymentRecordIds: [] }), '项目未匹配');
   assert.equal(supplierMatchStatus({ unmatchedPayment: true }), '付款未匹配PO');
+});
+
+test('includes only approved supplier applications', () => {
+  assert.equal(isApprovedApplication({ applicationStatus: '已通过' }), true);
+  assert.equal(isApprovedApplication({ applicationStatus: '审批中' }), false);
+  assert.equal(isApprovedApplication({ applicationStatus: '已拒绝' }), false);
+});
+
+test('skips approved payment when linked PO is explicitly unapproved', () => {
+  const poByApplicationNo = new Map([
+    ['PO1', { applicationNo: 'PO1', applicationStatus: '审批中' }],
+    ['PO2', { applicationNo: 'PO2', applicationStatus: '已通过' }],
+  ]);
+
+  assert.equal(shouldIncludePaymentApplication({ applicationStatus: '已通过', linkedPoApplicationNo: 'PO1' }, poByApplicationNo), false);
+  assert.equal(shouldIncludePaymentApplication({ applicationStatus: '已通过', linkedPoApplicationNo: 'PO2' }, poByApplicationNo), true);
+  assert.equal(shouldIncludePaymentApplication({ applicationStatus: '已通过', linkedPoApplicationNo: 'PO3' }, poByApplicationNo), true);
+  assert.equal(shouldIncludePaymentApplication({ applicationStatus: '审批中', linkedPoApplicationNo: 'PO2' }, poByApplicationNo), false);
 });

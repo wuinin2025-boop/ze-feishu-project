@@ -94,7 +94,14 @@ export async function callFeishuOpenApi(apiPath, { method = 'GET', data } = {}) 
 export async function callJson(client, name, args) {
   const result = await client.callTool({ name, arguments: args });
   const text = result.content?.find((item) => item.type === 'text')?.text;
-  const data = text ? JSON.parse(text) : result;
+  let data = result;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(`${name} returned non-JSON response: ${text.slice(0, 1000)}`);
+    }
+  }
   if (result.isError || (typeof data.code === 'number' && data.code !== 0)) {
     throw new Error(`${name} failed: ${JSON.stringify(data)}`);
   }

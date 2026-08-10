@@ -21,6 +21,8 @@ import {
   deriveSupplierInvoiceStatus,
   deriveSupplierPaymentStatus,
   extractApplicationNo,
+  isApprovedApplication,
+  shouldIncludePaymentApplication,
   supplierMatchStatus,
 } from '../rules/supplier-cost-rules.mjs';
 import {
@@ -134,7 +136,6 @@ const PROJECT_OVERVIEW_FIELDS = [
   '应收数据粒度',
   '开票回款计划说明',
   '最后同步时间',
-  '最近同步时间',
 ];
 
 const PROJECT_PROGRESS_FIELDS = [
@@ -478,7 +479,6 @@ function normalizeLedgerProject(source, record) {
       '数据来源': [source.name],
       '源更新时间': NOW,
       '最后同步时间': NOW,
-      '最近同步时间': NOW,
       '同步状态': '正常',
       '数据完整性状态': dataCompleteness({ projectNo, projectName: textValue(fields['项目名称']), manager }),
       '项目编号异常': projectNo ? '正常' : '缺失',
@@ -528,7 +528,6 @@ function normalizeEstablishmentProject(record) {
       '数据来源': ['源_立项申请'],
       '源更新时间': NOW,
       '最后同步时间': NOW,
-      '最近同步时间': NOW,
       '同步状态': '正常',
       '数据完整性状态': dataCompleteness({ projectNo, projectName: textValue(fields['项目名称']), manager }),
       '项目编号异常': projectNo ? '正常' : '缺失',
@@ -818,7 +817,6 @@ function buildInvoiceRows(invoices) {
     '源记录ID': invoice.sourceId,
     '备注': invoice.remark,
     '最后同步时间': NOW,
-    '最近同步时间': NOW,
   }));
 }
 
@@ -855,7 +853,6 @@ function buildPlanRows(plans, detailRecordIdsByKey, invoicesByKey) {
       '异常原因': plan.diffStatus === '金额异常待确认' ? '实际开票金额超过计划开票金额，需人工确认。' : '',
       '数据来源': plan.dataSource || '源立项开票计划',
       '最后同步时间': NOW,
-      '最近同步时间': NOW,
     };
   });
 }
@@ -875,7 +872,6 @@ function buildInvoicePlanLinkUpdates(matchedInvoices, detailRecordIdsByKey, plan
         '关联计划': firstPlanRecordId ? linkField(firstPlanRecordId) : [],
         '匹配状态': invoice.matchStatus,
         '最后同步时间': NOW,
-        '最近同步时间': NOW,
       },
     }];
   });
@@ -969,13 +965,11 @@ function actualPaymentsByPo(supplierPayments) {
 function supplierCostExceptionReasons({
   matchStatus,
   paymentStatus,
-  poStatus,
 }) {
   const reasons = [];
   if (matchStatus === '项目未匹配') reasons.push('项目编号未匹配项目总览表');
   if (matchStatus === '付款未匹配PO') reasons.push('付款申请未匹配到源_PO申请');
   if (paymentStatus === '超额付款') reasons.push('实际付款超过PO成本');
-  if (poStatus && poStatus !== '已通过') reasons.push('PO申请未通过');
   return reasons.join('；');
 }
 
@@ -1037,10 +1031,9 @@ function buildSupplierCostRows({ poApplications, paymentApplications, supplierPa
       '最近预计付款日期': maxTimestamp(payments.map((payment) => payment.expectedPaymentDate)),
       '最近实际付款日期': maxTimestamp(actual.dates),
       '数据匹配状态': matchStatus,
-      '异常原因': supplierCostExceptionReasons({ matchStatus, paymentStatus, poStatus: po.applicationStatus }),
+      '异常原因': supplierCostExceptionReasons({ matchStatus, paymentStatus }),
       '数据来源': '源_PO申请、源_付款申请、供应商付款',
       '最后同步时间': NOW,
-      '最近同步时间': NOW,
     });
   }
 
@@ -1070,10 +1063,9 @@ function buildSupplierCostRows({ poApplications, paymentApplications, supplierPa
       '最近付款申请日期': payment.startedAt,
       '最近预计付款日期': payment.expectedPaymentDate,
       '数据匹配状态': matchStatus,
-      '异常原因': supplierCostExceptionReasons({ matchStatus, paymentStatus, poStatus: '' }),
+      '异常原因': supplierCostExceptionReasons({ matchStatus, paymentStatus }),
       '数据来源': '源_付款申请',
       '最后同步时间': NOW,
-      '最近同步时间': NOW,
     });
   }
 
@@ -1101,7 +1093,7 @@ function buildProjectProgressCreateRows(projects, progressRows) {
       '关联项目': linkField(project.recordId),
       '任务状态': '进行中',
       '风险等级': '无',
-      '最近同步时间': NOW,
+      '最后同步时间': NOW,
     });
     existingProjectNos.add(project.projectNo);
   }
@@ -1176,8 +1168,14 @@ try {
     ? existingProjectOverviewRecords
     : await searchAll(client, APP_TOKEN, tableIds.get(TARGET_TABLE_NAMES.projectOverview), PROJECT_OVERVIEW_FIELDS);
   const supplierPayments = supplierPaymentRecords.map(normalizeSupplierPayment);
-  const poApplications = poApplicationRecords.map(normalizePoApplication);
-  const paymentApplications = paymentApplicationRecords.map(normalizePaymentApplication);
+  const allPoApplications = poApplicationRecords.map(normalizePoApplication);
+  const allPoByApplicationNo = new Map(allPoApplications
+    .filter((po) => po.applicationNo)
+    .map((po) => [po.applicationNo, po]));
+  const poApplications = allPoApplications.filter(isApprovedApplication);
+  const allPaymentApplications = paymentApplicationRecords.map(normalizePaymentApplication);
+  const paymentApplications = allPaymentApplications
+    .filter((payment) => shouldIncludePaymentApplication(payment, allPoByApplicationNo));
   const projectProgressRows = projectProgressRecords.map(normalizeProjectProgress);
   const projectOverviewRows = attachProjectRisks(
     attachProjectPayments(projectOverviewRecords.map(normalizeProjectOverview), supplierPayments),
@@ -1331,6 +1329,8 @@ try {
       supplier_cost_unpaid_rows: supplierCostRows.filter((row) => ['未申请付款', '已申请待付款', '部分付款'].includes(row['付款状态'])).length,
       supplier_cost_uninvoiced_rows: supplierCostRows.filter((row) => ['未收票', '部分收票'].includes(row['发票状态'])).length,
       stale_supplier_cost_rows: staleSupplierCostIds.length,
+      supplier_cost_skipped_unapproved_po_rows: allPoApplications.length - poApplications.length,
+      supplier_cost_skipped_unapproved_payment_rows: allPaymentApplications.length - paymentApplications.length,
       project_overview_updates: projectOverviewUpdates.length,
       project_overview_unchanged_rows: projectOverviewChanges.skipped.length,
       project_progress_created_candidates: projectProgressCreateRows.length,

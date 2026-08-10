@@ -13,13 +13,23 @@ export function buildSupplierCostKey({ poSourceId, poRecordId, paymentSourceId, 
   return '';
 }
 
+export function isApprovedApplication(row) {
+  return String(row?.applicationStatus || '').trim() === '已通过';
+}
+
+export function shouldIncludePaymentApplication(payment, poByApplicationNo) {
+  if (!isApprovedApplication(payment)) return false;
+  const linkedPoApplicationNo = String(payment?.linkedPoApplicationNo || '').trim();
+  if (!linkedPoApplicationNo) return true;
+  const linkedPo = poByApplicationNo.get(linkedPoApplicationNo);
+  return !linkedPo || isApprovedApplication(linkedPo);
+}
+
 export function deriveSupplierPaymentStatus({
-  poStatus,
   poAmount = 0,
   appliedPaymentAmount = 0,
   actualPaymentAmount = 0,
 }) {
-  if (poStatus && poStatus !== '已通过') return 'PO未通过';
   const cost = Number(poAmount || 0);
   const applied = Number(appliedPaymentAmount || 0);
   const actual = Number(actualPaymentAmount || 0);

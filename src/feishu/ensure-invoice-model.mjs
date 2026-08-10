@@ -12,6 +12,8 @@ import {
 } from './client.mjs';
 
 const DRY_RUN = process.argv.includes('--dry-run');
+const OBSOLETE_RECENT_SYNC_FIELD = '最近同步时间';
+const LAST_SYNC_DATE_FORMAT = 'yyyy-MM-dd HH:mm';
 
 const FIELD_TYPES = {
   text: 1,
@@ -73,7 +75,6 @@ const SUPPLIER_PAYMENT_STATUS_OPTIONS = [
   { name: '部分付款', color: 4 },
   { name: '已付款', color: 20 },
   { name: '超额付款', color: 44 },
-  { name: 'PO未通过', color: 2 },
 ];
 
 const SUPPLIER_INVOICE_STATUS_OPTIONS = [
@@ -129,8 +130,7 @@ const PROJECT_OVERVIEW_DESCRIPTIONS = {
   应收数据粒度: '本地同步标记本项目当前应收数据来源：计划开票、发票明细或项目汇总。',
   源记录ID: '本地同步写入所采用源记录的SourceID；缺失时使用飞书record_id，用于幂等同步。',
   源更新时间: '本地同步写入本次采用源记录时的同步时间。',
-  最后同步时间: '本地同步脚本本次实际改动本记录时写入；如果本次计算结果没有变化，会清空该字段，避免误认为数据发生变化。',
-  最近同步时间: '本地同步脚本本次实际改动本记录时写入，精确到分钟；如果本次计算结果没有变化，会清空该字段，避免误认为数据发生变化。',
+  最后同步时间: '本地同步脚本本次实际改动本记录时写入，精确到分钟；如果本次计算结果没有变化，会清空该字段，避免误认为数据发生变化。',
   同步状态: '本地同步写入；正常表示本次项目主数据同步成功，不代表所有业务字段均已填写。',
   项目编号异常: '本地同步校验项目编号：有项目编号为正常，缺失为缺失。',
   数据完整性状态: '本地同步校验项目编号、项目名称、当前项目负责人；三者都有值为完整，否则待补充。',
@@ -166,7 +166,7 @@ const PROJECT_PROGRESS_DESCRIPTIONS = {
   任务状态: '人工维护任务执行状态；本地同步新增经营项目进度记录时默认填进行中。',
   风险等级: '人工评估任务风险等级；本地同步新增经营项目进度记录时默认填无。',
   风险或阻碍: '人工记录任务风险、阻碍和需要协助事项。',
-  最近同步时间: '本地同步首次新增经营项目默认任务时写入，精确到分钟；后续人工维护任务内容时，本地同步不覆盖。',
+  最后同步时间: '本地同步首次新增经营项目默认任务时写入，精确到分钟；后续人工维护任务内容时，本地同步不覆盖。',
 };
 
 const INVOICE_PLAN_DESCRIPTIONS = {
@@ -196,44 +196,42 @@ const INVOICE_PLAN_DESCRIPTIONS = {
   回款逾期天数: '本地同步计算：回款状态为回款逾期时，按今天减预计回款日期计算；未逾期为0。',
   异常原因: '本地同步写入需要人工确认的原因；目前主要用于实际开票金额超过计划开票金额。',
   数据来源: '本地同步写入计划来源：旧项目开票计划补录或源立项开票计划。',
-  最后同步时间: '本地同步本次实际改动本计划记录时写入；如果本次计算结果没有变化，会清空该字段，避免误认为数据发生变化。',
-  最近同步时间: '本地同步本次实际改动本计划记录时写入，精确到分钟；如果本次计算结果没有变化，会清空该字段，避免误认为数据发生变化。',
+  最后同步时间: '本地同步本次实际改动本计划记录时写入，精确到分钟；如果本次计算结果没有变化，会清空该字段，避免误认为数据发生变化。',
   关联发票: '本地同步关联自动匹配到本计划期次的开票明细统一表记录；一张发票覆盖连续多期时，多期会关联同一张发票。',
 };
 
 const SUPPLIER_COST_DESCRIPTIONS = {
   成本记录标题: '本地同步生成：项目编号、供应商和 PO 申请编号组合显示。',
-  成本唯一键: '本地同步唯一键；优先使用源_PO申请的 SourceID，缺失时使用 PO 记录 ID。付款申请找不到 PO 时使用付款申请 SourceID 生成异常行。',
+  成本唯一键: '本地同步唯一键；优先使用已通过源_PO申请的 SourceID，缺失时使用 PO 记录 ID。已通过付款申请找不到已通过 PO 时使用付款申请 SourceID 生成异常行。',
   关联项目: '本地同步按项目编号关联项目总览表；用于按项目查看供应商成本。',
-  关联PO: '本地同步关联对应的源_PO申请记录；只读来源，不写入源表。',
-  关联付款申请: '本地同步关联当前 PO 下的源_付款申请记录；一条 PO 可对应多条付款申请。',
+  关联PO: '本地同步关联对应的已通过源_PO申请记录；只读来源，不写入源表。',
+  关联付款申请: '本地同步关联当前已通过 PO 下的已通过源_付款申请记录；一条 PO 可对应多条付款申请。',
   项目编号: '本地同步写入；优先取源_PO申请项目编号，付款未匹配 PO 时取源_付款申请项目编号。',
   项目名称: '本地同步写入；优先取源_PO申请项目名称，付款未匹配 PO 时取源_付款申请项目名称。',
   立项公司: '本地同步优先取源_PO申请立项公司；用于按公司筛选成本。',
   供应商: '本地同步写入源_PO申请或源_付款申请中的供应商名称。',
   服务内容: '本地同步写入源_PO申请的服务内容。',
   PO申请编号: '本地同步写入源_PO申请申请编号；付款未匹配 PO 时为空。',
-  PO申请状态: '本地同步写入源_PO申请审批状态。',
+  PO申请状态: '本地同步写入源_PO申请审批状态；只有已通过 PO 会进入本表。',
   PO申请时间: '本地同步写入源_PO申请发起时间。',
   PO完成时间: '本地同步写入源_PO申请完成时间。',
   PO成本金额: '本地同步写入源_PO申请金额1，作为供应商项目成本口径。',
   PO对客报价金额: '本地同步写入源_PO申请该 PO 对客报价金额，用于核对单条 PO 利润。',
   PO利润: '本地同步写入源_PO申请利润。',
-  付款申请金额合计: '本地同步汇总该 PO 关联的源_付款申请金额1；这是付款申请金额，不代表实际已付款。',
+  付款申请金额合计: '本地同步汇总该 PO 关联的已通过源_付款申请金额1；这是付款申请金额，不代表实际已付款。',
   实际付款金额合计: '本地同步汇总供应商付款表中关联该 PO 的实际付款金额；财务人工确认后才代表真实付款。',
   未付款金额: '本地同步计算：PO成本金额减实际付款金额合计，小于0按0显示。',
-  付款状态: '本地同步计算：无付款申请为未申请付款；有申请未实际付款为已申请待付款；实际付款小于 PO 成本为部分付款；达到为已付款；超过为超额付款。',
-  发票状态: '本地同步根据源_付款申请的发票情况判断：全部收到为已收票，部分收到为部分收票，全部未收到为未收票，没有付款申请为未申请付款。',
+  付款状态: '本地同步计算：无已通过付款申请为未申请付款；有已通过申请未实际付款为已申请待付款；实际付款小于 PO 成本为部分付款；达到为已付款；超过为超额付款。',
+  发票状态: '本地同步根据已通过源_付款申请的发票情况判断：全部收到为已收票，部分收到为部分收票，全部未收到为未收票，没有已通过付款申请为未申请付款。',
   付款申请编号汇总: '本地同步汇总当前 PO 下所有付款申请编号，多个用顿号分隔。',
   最近付款申请日期: '本地同步取当前 PO 下最新一条付款申请发起时间。',
   最近预计付款日期: '本地同步取当前 PO 下最新一条付款申请付款日期。',
   最近实际付款日期: '本地同步取供应商付款表中当前 PO 最近一次实际付款日期。',
-  数据匹配状态: '本地同步计算项目和付款匹配情况；付款申请找不到 PO 时标记付款未匹配PO。',
-  异常原因: '本地同步写入需要人工处理的问题，例如项目编号未匹配、付款申请未匹配到 PO、实际付款超过 PO 成本。',
+  数据匹配状态: '本地同步计算项目和已通过付款申请匹配情况；已通过付款申请找不到已通过 PO 时标记付款未匹配PO。',
+  异常原因: '本地同步写入需要人工处理的问题，例如项目编号未匹配、已通过付款申请未匹配到已通过 PO、实际付款超过 PO 成本。',
   权限_可管理人员: '本地同步从关联项目的当前项目负责人、项目参与人员、交接协同人带出，供后续高级权限参考。',
   数据来源: '本地同步写入来源，一般为源_PO申请、源_付款申请和供应商付款。',
-  最后同步时间: '本地同步本次实际改动本记录时写入；如果本次计算结果没有变化，会清空该字段，避免误认为数据发生变化。',
-  最近同步时间: '本地同步本次实际改动本记录时写入，精确到分钟；如果本次计算结果没有变化，会清空该字段，避免误认为数据发生变化。',
+  最后同步时间: '本地同步本次实际改动本记录时写入，精确到分钟；如果本次计算结果没有变化，会清空该字段，避免误认为数据发生变化。',
 };
 
 function field(fieldName, type, property = {}, description = '') {
@@ -258,7 +256,7 @@ function date(fieldName, description = '') {
 }
 
 function dateTime(fieldName, description = '') {
-  return field(fieldName, FIELD_TYPES.date, { date_formatter: 'yyyy/MM/dd HH:mm' }, description);
+  return field(fieldName, FIELD_TYPES.date, { date_formatter: LAST_SYNC_DATE_FORMAT }, description);
 }
 
 function select(fieldName, options, description = '') {
@@ -402,6 +400,11 @@ function fieldUpdateProperty(fieldItem) {
   return fieldItem.property;
 }
 
+function fieldUpdateDescription(fieldItem) {
+  const text = fieldDescriptionText(fieldItem);
+  return text ? { text } : undefined;
+}
+
 async function ensureFieldDescription(client, tableName, tableId, fieldsByName, fieldName, description, report, options = {}) {
   assertWritableTableName(tableName);
   const existing = fieldsByName.get(fieldName);
@@ -433,6 +436,48 @@ async function ensureFieldDescriptions(client, tableName, tableId, fieldsByName,
   }
 }
 
+async function ensureDateFieldFormat(client, tableName, tableId, fieldsByName, fieldName, dateFormatter, report) {
+  assertWritableTableName(tableName);
+  const existing = fieldsByName.get(fieldName);
+  if (!existing || existing.type !== FIELD_TYPES.date) return;
+  if (existing.property?.date_formatter === dateFormatter) return;
+  report.planned.field_descriptions.push(`${tableName}.${fieldName}.格式`);
+  if (DRY_RUN) return;
+  await callJson(client, 'bitable_v1_appTableField_update', {
+    path: { app_token: APP_TOKEN, table_id: tableId, field_id: existing.field_id },
+    data: {
+      field_name: existing.field_name,
+      type: existing.type,
+      property: {
+        ...(existing.property || {}),
+        date_formatter: dateFormatter,
+      },
+      ...(fieldUpdateDescription(existing) ? { description: fieldUpdateDescription(existing) } : {}),
+    },
+  });
+  fieldsByName.set(fieldName, {
+    ...existing,
+    property: {
+      ...(existing.property || {}),
+      date_formatter: dateFormatter,
+    },
+  });
+  report.updated.field_descriptions.push(`${tableName}.${fieldName}.格式`);
+}
+
+async function deleteObsoleteField(client, tableName, tableId, fieldsByName, fieldName, report) {
+  assertWritableTableName(tableName);
+  const existing = fieldsByName.get(fieldName);
+  if (!existing) return;
+  report.planned.deleted_fields.push(`${tableName}.${fieldName}`);
+  if (DRY_RUN) return;
+  await callJson(client, 'bitable_v1_appTableField_delete', {
+    path: { app_token: APP_TOKEN, table_id: tableId, field_id: existing.field_id },
+  });
+  fieldsByName.delete(fieldName);
+  report.deleted.fields.push(`${tableName}.${fieldName}`);
+}
+
 async function ensureViews(client, tableName, tableId, viewNames, report) {
   assertWritableTableName(tableName);
   if (!tableId) {
@@ -456,9 +501,10 @@ async function ensureViews(client, tableName, tableId, viewNames, report) {
 async function ensureInvoiceModel(client) {
   const report = {
     dry_run: DRY_RUN,
-    planned: { tables: [], fields: [], field_descriptions: [], views: [] },
+    planned: { tables: [], fields: [], field_descriptions: [], deleted_fields: [], views: [] },
     created: { tables: [], fields: [], views: [] },
     updated: { field_descriptions: [] },
+    deleted: { fields: [] },
     skipped_formula_fields: [],
     protected_tables: [TARGET_TABLE_NAMES.oldProjectPlan],
   };
@@ -490,9 +536,11 @@ async function ensureInvoiceModel(client) {
     TARGET_TABLE_NAMES.projectOverview,
     projectOverviewId,
     overviewFields,
-    dateTime('最近同步时间', PROJECT_OVERVIEW_DESCRIPTIONS.最近同步时间),
+    dateTime('最后同步时间', PROJECT_OVERVIEW_DESCRIPTIONS.最后同步时间),
     report,
   );
+  await ensureDateFieldFormat(client, TARGET_TABLE_NAMES.projectOverview, projectOverviewId, overviewFields, '最后同步时间', LAST_SYNC_DATE_FORMAT, report);
+  await deleteObsoleteField(client, TARGET_TABLE_NAMES.projectOverview, projectOverviewId, overviewFields, OBSOLETE_RECENT_SYNC_FIELD, report);
 
   const planTableId = await ensureTable(client, tablesByName, TARGET_TABLE_NAMES.invoicePlan, '计划唯一键', '全部计划', report);
   const detailTableId = await ensureTable(client, tablesByName, TARGET_TABLE_NAMES.invoiceDetail, '明细唯一键', '全部明细', report);
@@ -513,9 +561,11 @@ async function ensureInvoiceModel(client) {
       TARGET_TABLE_NAMES.projectProgress,
       progressTableId,
       progressFields,
-      dateTime('最近同步时间', PROJECT_PROGRESS_DESCRIPTIONS.最近同步时间),
+      dateTime('最后同步时间', PROJECT_PROGRESS_DESCRIPTIONS.最后同步时间),
       report,
     );
+    await ensureDateFieldFormat(client, TARGET_TABLE_NAMES.projectProgress, progressTableId, progressFields, '最后同步时间', LAST_SYNC_DATE_FORMAT, report);
+    await deleteObsoleteField(client, TARGET_TABLE_NAMES.projectProgress, progressTableId, progressFields, OBSOLETE_RECENT_SYNC_FIELD, report);
   }
   if (DRY_RUN && (!planTableId || !detailTableId || !supplierCostTableId)) return report;
 
@@ -555,8 +605,9 @@ async function ensureInvoiceModel(client) {
   await ensureField(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, planFields, number('回款逾期天数'), report);
   await ensureField(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, planFields, text('异常原因'), report);
   await ensureField(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, planFields, text('数据来源'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, planFields, date('最后同步时间'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, planFields, dateTime('最近同步时间', INVOICE_PLAN_DESCRIPTIONS.最近同步时间), report);
+  await ensureField(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, planFields, dateTime('最后同步时间', INVOICE_PLAN_DESCRIPTIONS.最后同步时间), report);
+  await ensureDateFieldFormat(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, planFields, '最后同步时间', LAST_SYNC_DATE_FORMAT, report);
+  await deleteObsoleteField(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, planFields, OBSOLETE_RECENT_SYNC_FIELD, report);
 
   await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, text('来源主体'), report);
   await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, text('发票编号'), report);
@@ -579,8 +630,9 @@ async function ensureInvoiceModel(client) {
   await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, text('源表名称'), report);
   await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, text('源记录ID'), report);
   await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, text('备注'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, date('最后同步时间'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, dateTime('最近同步时间', '本地同步本次实际改动本记录时写入，精确到分钟；如果本次计算结果没有变化，会清空该字段，避免误认为数据发生变化。'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, dateTime('最后同步时间', '本地同步本次实际改动本记录时写入，精确到分钟；如果本次计算结果没有变化，会清空该字段，避免误认为数据发生变化。'), report);
+  await ensureDateFieldFormat(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, '最后同步时间', LAST_SYNC_DATE_FORMAT, report);
+  await deleteObsoleteField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, OBSOLETE_RECENT_SYNC_FIELD, report);
 
   await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, text('成本唯一键'), report);
   await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, singleLink('关联项目', projectOverviewId), report);
@@ -610,8 +662,9 @@ async function ensureInvoiceModel(client) {
   await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, select('数据匹配状态', SUPPLIER_MATCH_STATUS_OPTIONS), report);
   await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, text('异常原因'), report);
   await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, text('数据来源'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, date('最后同步时间'), report);
-  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, dateTime('最近同步时间', SUPPLIER_COST_DESCRIPTIONS.最近同步时间), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, dateTime('最后同步时间', SUPPLIER_COST_DESCRIPTIONS.最后同步时间), report);
+  await ensureDateFieldFormat(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, '最后同步时间', LAST_SYNC_DATE_FORMAT, report);
+  await deleteObsoleteField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, OBSOLETE_RECENT_SYNC_FIELD, report);
 
   await ensureField(client, TARGET_TABLE_NAMES.invoicePlan, actualPlanTableId, planFields, singleLink('关联发票', actualDetailTableId, '脚本匹配到本计划期次的开票明细。', true), report);
   await ensureField(client, TARGET_TABLE_NAMES.invoiceDetail, actualDetailTableId, detailFields, singleLink('关联计划', actualPlanTableId, '脚本匹配到的项目开票计划期次；一张发票覆盖多期时，项目开票计划表会按期次拆分金额，明细表此字段保留首个匹配期次。', true), report);
@@ -694,6 +747,7 @@ const client = await connectFeishu([
   'bitable.v1.appTableField.list',
   'bitable.v1.appTableField.create',
   'bitable.v1.appTableField.update',
+  'bitable.v1.appTableField.delete',
   'bitable.v1.appTableView.list',
   'bitable.v1.appTableView.create',
 ]);

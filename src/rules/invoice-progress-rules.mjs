@@ -583,7 +583,6 @@ export function buildProjectOverviewMetricRows({ projects, plans, invoices, toda
       projectNo: project.projectNo,
       fields: {
         '最后同步时间': today,
-        '最近同步时间': today,
         '项目状态': deriveProjectStatus({
           currentStatus: project.projectStatus,
           projectNo: project.projectNo,
