@@ -6,6 +6,11 @@ const HANKOOK_DISPLAY_INVOICE_NO = 'Hankook 001';
 const THIRTY_DAYS_MS = DAY_MS * 30;
 const MANUAL_PROJECT_STATUSES = new Set(['暂停', '暂缓', '已终止', '已取消']);
 const AMOUNT_TOLERANCE = 0.01;
+const NEAR_PERIOD_TOLERANCE_RATE = 0.005;
+
+function amountTolerance(amount) {
+  return Math.max(AMOUNT_TOLERANCE, Math.abs(Number(amount || 0)) * NEAR_PERIOD_TOLERANCE_RATE);
+}
 
 export function classifyApplication(applicationNo) {
   const value = String(applicationNo || '').trim();
@@ -15,7 +20,7 @@ export function classifyApplication(applicationNo) {
 
 export function deriveInvoiceStatus({ planDate, planAmount, actualInvoiceAmount = 0, today = Date.now() }) {
   if (!planDate || !planAmount) return '待人工补充';
-  if (actualInvoiceAmount >= planAmount) return '已开票';
+  if (actualInvoiceAmount >= planAmount - amountTolerance(planAmount)) return '已开票';
   if (actualInvoiceAmount > 0) return '部分开票';
 
   const daysUntil = Math.floor((planDate - today) / DAY_MS);
@@ -283,11 +288,11 @@ export function matchInvoicesToPlans(plans, invoices, { today = Date.now() } = {
     return matchedPlans.filter((plan) => (
       plan.projectNo === invoice.projectNo
       && Number(plan.planAmount || 0) > 0
-      && plan.actualInvoiceAmount < Number(plan.planAmount || 0) - AMOUNT_TOLERANCE
+      && plan.actualInvoiceAmount < Number(plan.planAmount || 0) - amountTolerance(plan.planAmount)
     ));
   }
 
-  function exactSplitAllocations(invoice, candidates) {
+  function splitAllocations(invoice, candidates) {
     const invoiceAmount = Number(invoice.invoiceAmount || 0);
     if (invoiceAmount <= 0) return [];
     let remaining = invoiceAmount;
@@ -295,7 +300,16 @@ export function matchInvoicesToPlans(plans, invoices, { today = Date.now() } = {
     for (const plan of candidates) {
       const capacity = Number((Number(plan.planAmount || 0) - Number(plan.actualInvoiceAmount || 0)).toFixed(2));
       if (capacity <= AMOUNT_TOLERANCE) continue;
-      if (remaining + AMOUNT_TOLERANCE < capacity) break;
+      if (remaining + AMOUNT_TOLERANCE < capacity) {
+        const nearPeriodTail = allocations.length > 0
+          && remaining > AMOUNT_TOLERANCE
+          && (capacity - remaining) <= amountTolerance(capacity);
+        if (nearPeriodTail) {
+          allocations.push({ plan, amount: remaining });
+          return allocations;
+        }
+        break;
+      }
       allocations.push({ plan, amount: capacity });
       remaining = Number((remaining - capacity).toFixed(2));
       if (Math.abs(remaining) <= AMOUNT_TOLERANCE) return allocations;
@@ -324,15 +338,11 @@ export function matchInvoicesToPlans(plans, invoices, { today = Date.now() } = {
       continue;
     }
     const candidates = unfinishedPlansForInvoice(invoice);
-    const splitAllocations = exactSplitAllocations(invoice, candidates);
-    if (splitAllocations.length) {
-      const invoiceAmount = Number(invoice.invoiceAmount || 0);
-      const invoiceReceivedAmount = Number(invoice.receivedAmount || 0);
-      let remainingReceivedAmount = invoiceReceivedAmount;
-      for (const [index, allocation] of splitAllocations.entries()) {
-        const receivedShare = index === splitAllocations.length - 1
-          ? Number(remainingReceivedAmount.toFixed(2))
-          : Number(((invoiceReceivedAmount * allocation.amount) / invoiceAmount).toFixed(2));
+    const invoiceSplitAllocations = splitAllocations(invoice, candidates);
+    if (invoiceSplitAllocations.length) {
+      let remainingReceivedAmount = Number(invoice.receivedAmount || 0);
+      for (const allocation of invoiceSplitAllocations) {
+        const receivedShare = Number(Math.min(allocation.amount, Math.max(remainingReceivedAmount, 0)).toFixed(2));
         remainingReceivedAmount = Number((remainingReceivedAmount - receivedShare).toFixed(2));
         applyInvoiceAllocation(invoice, allocation.plan, allocation.amount, receivedShare);
       }
@@ -353,11 +363,11 @@ export function matchInvoicesToPlans(plans, invoices, { today = Date.now() } = {
   for (const plan of matchedPlans) {
     const planAmount = Number(plan.planAmount || 0);
     const actualAmount = Number(plan.actualInvoiceAmount || 0);
-    if (actualAmount > planAmount + AMOUNT_TOLERANCE) {
+    if (actualAmount > planAmount + amountTolerance(planAmount)) {
       plan.matchStatus = '金额异常待确认';
       plan.diffStatus = '金额异常待确认';
     } else if (actualAmount > 0) {
-      plan.matchStatus = actualAmount >= planAmount - AMOUNT_TOLERANCE ? '已匹配' : '部分匹配';
+      plan.matchStatus = actualAmount >= planAmount - amountTolerance(planAmount) ? '已匹配' : '部分匹配';
     }
     plan.invoiceStatus = deriveInvoiceStatus({
       planDate: plan.planDate,

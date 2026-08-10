@@ -227,13 +227,49 @@ test('invoice matching splits exact multi-period invoice across consecutive plan
   assert.deepEqual(result.invoices[0].linkedPlanKeys, ['P1-1', 'P1-2', 'P1-3']);
   assert.equal(result.invoices[0].linkedPlanKey, 'P1-1');
   assert.deepEqual(result.plans.map((plan) => plan.actualInvoiceAmount), [70000, 70000, 70000, 0]);
-  assert.deepEqual(result.plans.map((plan) => plan.receivedAmount), [46666.67, 46666.67, 46666.66, 0]);
+  assert.deepEqual(result.plans.map((plan) => plan.receivedAmount), [70000, 70000, 0, 0]);
   assert.deepEqual(result.plans.map((plan) => plan.matchStatus), ['已匹配', '已匹配', '已匹配', '待匹配']);
   assert.deepEqual(result.plans.slice(0, 3).map((plan) => plan.linkedInvoiceKeys), [
     ['集熠开票明细|F1'],
     ['集熠开票明细|F1'],
     ['集熠开票明细|F1'],
   ]);
+});
+
+test('invoice matching splits near multi-period invoice without rolling normal mismatch', () => {
+  const today = Date.UTC(2026, 7, 10);
+  const result = matchInvoicesToPlans([
+    { projectNo: 'P1', period: 1, planAmount: 109166, planDate: Date.UTC(2026, 0, 31), expectedPaymentDate: Date.UTC(2026, 2, 9) },
+    { projectNo: 'P1', period: 2, planAmount: 109166, planDate: Date.UTC(2026, 1, 28), expectedPaymentDate: Date.UTC(2026, 3, 9) },
+    { projectNo: 'P1', period: 3, planAmount: 109166, planDate: Date.UTC(2026, 2, 31), expectedPaymentDate: Date.UTC(2026, 4, 9) },
+    { projectNo: 'P1', period: 4, planAmount: 109166, planDate: Date.UTC(2026, 4, 9), expectedPaymentDate: Date.UTC(2026, 5, 9) },
+    { projectNo: 'P1', period: 5, planAmount: 109166, planDate: Date.UTC(2026, 5, 9), expectedPaymentDate: Date.UTC(2026, 6, 9) },
+  ], [
+    {
+      sourceName: '集熠开票明细',
+      sourceId: 'rec1',
+      projectNo: 'P1',
+      invoiceNo: 'F1',
+      invoiceAmount: 436464,
+      receivedAmount: 327298,
+      invoiceDate: Date.UTC(2026, 5, 29),
+    },
+    {
+      sourceName: '集熠开票明细',
+      sourceId: 'rec2',
+      projectNo: 'P1',
+      invoiceNo: 'F2',
+      invoiceAmount: 109166,
+      receivedAmount: 109166,
+      invoiceDate: Date.UTC(2026, 6, 22),
+    },
+  ], { today });
+
+  assert.deepEqual(result.invoices[0].linkedPlanKeys, ['P1-1', 'P1-2', 'P1-3', 'P1-4']);
+  assert.deepEqual(result.invoices[1].linkedPlanKeys, ['P1-5']);
+  assert.deepEqual(result.plans.map((plan) => plan.actualInvoiceAmount), [109166, 109166, 109166, 108966, 109166]);
+  assert.deepEqual(result.plans.map((plan) => plan.receivedAmount), [109166, 109166, 108966, 0, 109166]);
+  assert.deepEqual(result.plans.map((plan) => plan.matchStatus), ['已匹配', '已匹配', '已匹配', '已匹配', '已匹配']);
 });
 
 test('offset invoices are excluded before matching', () => {
