@@ -135,7 +135,7 @@ const PROJECT_OVERVIEW_FIELDS = [
   '回款计划预警',
   '应收数据粒度',
   '开票回款计划说明',
-  '最后同步时间',
+  '最近同步时间',
 ];
 
 const PROJECT_PROGRESS_FIELDS = [
@@ -166,11 +166,11 @@ const PO_APPLICATION_FIELDS = [
   '申请状态',
   '发起时间',
   '完成时间',
-  '项目编号1',
-  '项目名称1',
+  '项目编号',
+  '项目名称',
   '该po对客报价金额',
   '利润',
-  '立项公司1',
+  '立项公司',
   '服务内容1',
   '金额1',
   '供应商名称1',
@@ -478,7 +478,7 @@ function normalizeLedgerProject(source, record) {
       '源记录ID': textValue(fields.SourceID) || record.record_id,
       '数据来源': [source.name],
       '源更新时间': NOW,
-      '最后同步时间': NOW,
+      '最近同步时间': NOW,
       '同步状态': '正常',
       '数据完整性状态': dataCompleteness({ projectNo, projectName: textValue(fields['项目名称']), manager }),
       '项目编号异常': projectNo ? '正常' : '缺失',
@@ -527,7 +527,7 @@ function normalizeEstablishmentProject(record) {
       '源记录ID': textValue(fields.SourceID) || record.record_id,
       '数据来源': ['源_立项申请'],
       '源更新时间': NOW,
-      '最后同步时间': NOW,
+      '最近同步时间': NOW,
       '同步状态': '正常',
       '数据完整性状态': dataCompleteness({ projectNo, projectName: textValue(fields['项目名称']), manager }),
       '项目编号异常': projectNo ? '正常' : '缺失',
@@ -654,11 +654,11 @@ function normalizePoApplication(record) {
     applicationStatus: textValue(fields['申请状态']),
     startedAt: timestampValue(fields['发起时间']),
     completedAt: timestampValue(fields['完成时间']),
-    projectNo: textValue(fields['项目编号1']),
-    projectName: textValue(fields['项目名称1']),
+    projectNo: textValue(fields['项目编号']) || textValue(fields['项目编号1']),
+    projectName: textValue(fields['项目名称']) || textValue(fields['项目名称1']),
     quotedAmount: numberValue(fields['该po对客报价金额']) || 0,
     profitAmount: numberValue(fields['利润']) || 0,
-    companyName: textValue(fields['立项公司1']),
+    companyName: textValue(fields['立项公司']) || textValue(fields['立项公司1']),
     serviceContent: textValue(fields['服务内容1']),
     costAmount: numberValue(fields['金额1']) || 0,
     supplierName: textValue(fields['供应商名称1']),
@@ -816,7 +816,7 @@ function buildInvoiceRows(invoices) {
     '源表名称': invoice.sourceName,
     '源记录ID': invoice.sourceId,
     '备注': invoice.remark,
-    '最后同步时间': NOW,
+    '最近同步时间': NOW,
   }));
 }
 
@@ -852,7 +852,7 @@ function buildPlanRows(plans, detailRecordIdsByKey, invoicesByKey) {
       '回款逾期天数': plan.paymentOverdueDays,
       '异常原因': plan.diffStatus === '金额异常待确认' ? '实际开票金额超过计划开票金额，需人工确认。' : '',
       '数据来源': plan.dataSource || '源立项开票计划',
-      '最后同步时间': NOW,
+      '最近同步时间': NOW,
     };
   });
 }
@@ -871,7 +871,7 @@ function buildInvoicePlanLinkUpdates(matchedInvoices, detailRecordIdsByKey, plan
       fields: {
         '关联计划': firstPlanRecordId ? linkField(firstPlanRecordId) : [],
         '匹配状态': invoice.matchStatus,
-        '最后同步时间': NOW,
+        '最近同步时间': NOW,
       },
     }];
   });
@@ -1033,7 +1033,7 @@ function buildSupplierCostRows({ poApplications, paymentApplications, supplierPa
       '数据匹配状态': matchStatus,
       '异常原因': supplierCostExceptionReasons({ matchStatus, paymentStatus }),
       '数据来源': '源_PO申请、源_付款申请、供应商付款',
-      '最后同步时间': NOW,
+      '最近同步时间': NOW,
     });
   }
 
@@ -1065,7 +1065,7 @@ function buildSupplierCostRows({ poApplications, paymentApplications, supplierPa
       '数据匹配状态': matchStatus,
       '异常原因': supplierCostExceptionReasons({ matchStatus, paymentStatus }),
       '数据来源': '源_付款申请',
-      '最后同步时间': NOW,
+      '最近同步时间': NOW,
     });
   }
 
@@ -1093,7 +1093,7 @@ function buildProjectProgressCreateRows(projects, progressRows) {
       '关联项目': linkField(project.recordId),
       '任务状态': '进行中',
       '风险等级': '无',
-      '最后同步时间': NOW,
+      '最近同步时间': NOW,
     });
     existingProjectNos.add(project.projectNo);
   }

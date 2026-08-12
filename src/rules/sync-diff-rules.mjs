@@ -1,4 +1,4 @@
-const LAST_SYNC_FIELD = '最后同步时间';
+const LAST_SYNC_FIELD = '最近同步时间';
 const TIME_ONLY_FIELDS = new Set([LAST_SYNC_FIELD, '源更新时间']);
 
 function cleanUpdateFieldsWithClears(row, clearableFields = []) {
@@ -55,20 +55,12 @@ function fieldChanged(existingFields, fieldName, nextValue) {
 }
 
 export function changedUpdateFields(existingFields, nextFields, options = {}) {
-  const clearUnchangedLastSync = options.clearUnchangedLastSync !== false;
   const createOnlyFields = new Set(options.createOnlyFields || []);
   const fields = cleanUpdateFieldsWithClears(nextFields, options.clearableFields || []);
   for (const fieldName of createOnlyFields) delete fields[fieldName];
   const changedEntries = Object.entries(fields)
     .filter(([fieldName, value]) => !TIME_ONLY_FIELDS.has(fieldName) && fieldChanged(existingFields, fieldName, value));
   if (!changedEntries.length) {
-    if (
-      clearUnchangedLastSync
-      && Object.hasOwn(fields, LAST_SYNC_FIELD)
-      && comparableFieldValue(existingFields?.[LAST_SYNC_FIELD])
-    ) {
-      return { [LAST_SYNC_FIELD]: null };
-    }
     return {};
   }
   const changed = Object.fromEntries(changedEntries);
