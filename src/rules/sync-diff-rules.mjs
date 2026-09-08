@@ -54,16 +54,36 @@ function fieldChanged(existingFields, fieldName, nextValue) {
   return current !== next;
 }
 
+function isEmptyFieldValue(value) {
+  if (value == null || value === '') return true;
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
+}
+
 export function changedUpdateFields(existingFields, nextFields, options = {}) {
   const createOnlyFields = new Set(options.createOnlyFields || []);
+  const fillEmptyFields = new Set(options.fillEmptyFields || []);
+  const ignoredDiffFields = new Set(options.ignoredDiffFields || []);
   const fields = cleanUpdateFieldsWithClears(nextFields, options.clearableFields || []);
   for (const fieldName of createOnlyFields) delete fields[fieldName];
+  for (const fieldName of fillEmptyFields) {
+    if (!isEmptyFieldValue(existingFields?.[fieldName])) delete fields[fieldName];
+  }
   const changedEntries = Object.entries(fields)
-    .filter(([fieldName, value]) => !TIME_ONLY_FIELDS.has(fieldName) && fieldChanged(existingFields, fieldName, value));
+    .filter(([fieldName, value]) => (
+      !TIME_ONLY_FIELDS.has(fieldName)
+      && !ignoredDiffFields.has(fieldName)
+      && fieldChanged(existingFields, fieldName, value)
+    ));
   if (!changedEntries.length) {
     return {};
   }
   const changed = Object.fromEntries(changedEntries);
+  for (const fieldName of ignoredDiffFields) {
+    if (Object.hasOwn(fields, fieldName) && fieldChanged(existingFields, fieldName, fields[fieldName])) {
+      changed[fieldName] = fields[fieldName];
+    }
+  }
   if (Object.hasOwn(fields, LAST_SYNC_FIELD)) changed[LAST_SYNC_FIELD] = fields[LAST_SYNC_FIELD];
   if (Object.hasOwn(fields, '源更新时间')) changed['源更新时间'] = fields['源更新时间'];
   return changed;
