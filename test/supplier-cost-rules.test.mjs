@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildSupplierCostKey,
+  deduplicateSupplierPayments,
   deriveSupplierInvoiceStatus,
   deriveSupplierPaymentStatus,
   extractApplicationNo,
@@ -61,4 +62,41 @@ test('skips approved payment when linked PO is explicitly unapproved', () => {
   assert.equal(shouldIncludePaymentApplication({ applicationStatus: '已通过', linkedPoApplicationNo: 'PO2' }, poByApplicationNo), true);
   assert.equal(shouldIncludePaymentApplication({ applicationStatus: '已通过', linkedPoApplicationNo: 'PO3' }, poByApplicationNo), true);
   assert.equal(shouldIncludePaymentApplication({ applicationStatus: '审批中', linkedPoApplicationNo: 'PO2' }, poByApplicationNo), false);
+});
+
+test('deduplicates supplier payments and keeps the manually completed record', () => {
+  const payments = deduplicateSupplierPayments([
+    {
+      recordId: 'old',
+      projectNo: 'E250601BONNIE',
+      paymentApplicationNo: '202605270016',
+      linkedPoRecordIds: ['po1'],
+      paymentAmount: 699865,
+      actualPaymentAmount: 0,
+      paymentStatus: '审核通过待付款',
+    },
+    {
+      recordId: 'manual',
+      projectNo: 'E250601BONNIE',
+      paymentApplicationNo: '202605270016',
+      linkedPoRecordIds: ['po1'],
+      paymentAmount: 699865,
+      actualPaymentAmount: 699865,
+      actualPaymentDate: Date.UTC(2026, 8, 10),
+      paymentStatus: '已付款',
+    },
+  ]);
+
+  assert.equal(payments.length, 1);
+  assert.equal(payments[0].recordId, 'manual');
+  assert.equal(payments[0].actualPaymentAmount, 699865);
+});
+
+test('does not merge different payment applications for the same PO and amount', () => {
+  const payments = deduplicateSupplierPayments([
+    { recordId: 'one', projectNo: 'P1', paymentApplicationNo: '202601010001', linkedPoRecordIds: ['po1'], paymentAmount: 100 },
+    { recordId: 'two', projectNo: 'P1', paymentApplicationNo: '202601010002', linkedPoRecordIds: ['po1'], paymentAmount: 100 },
+  ]);
+
+  assert.equal(payments.length, 2);
 });

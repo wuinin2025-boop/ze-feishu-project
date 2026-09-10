@@ -631,6 +631,7 @@ export function buildProjectOverviewMetricRows({ projects, plans, invoices, toda
           invoiceAmount,
           actualPaymentAmount,
         }),
+        '供应商待付款金额': roundCurrency(project.supplierOutstandingAmount),
         '累计实际付款金额': actualPaymentAmount,
         '未关闭风险数': Number(project.openRiskCount || 0),
         '已开票金额': invoiceAmount,

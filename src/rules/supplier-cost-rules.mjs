@@ -25,6 +25,32 @@ export function shouldIncludePaymentApplication(payment, poByApplicationNo) {
   return !linkedPo || isApprovedApplication(linkedPo);
 }
 
+function paymentRecordScore(payment) {
+  return (
+    (Number(payment?.actualPaymentAmount || 0) !== 0 ? 8 : 0)
+    + (payment?.actualPaymentDate ? 4 : 0)
+    + (String(payment?.paymentStatus || '').trim() === '已付款' ? 2 : 0)
+    + (Number(payment?.paymentAmount || 0) !== 0 ? 1 : 0)
+  );
+}
+
+export function deduplicateSupplierPayments(payments = []) {
+  const selected = new Map();
+  for (const payment of payments) {
+    const applicationNo = String(payment?.paymentApplicationNo || '').trim();
+    const poIds = [...(payment?.linkedPoRecordIds || [])].sort().join(',');
+    const projectNo = String(payment?.projectNo || '').trim().toUpperCase();
+    const key = applicationNo && poIds
+      ? `${projectNo}|${applicationNo}|${poIds}`
+      : `record|${payment?.recordId || selected.size}`;
+    const current = selected.get(key);
+    if (!current || paymentRecordScore(payment) > paymentRecordScore(current)) {
+      selected.set(key, payment);
+    }
+  }
+  return [...selected.values()];
+}
+
 export function deriveSupplierPaymentStatus({
   poAmount = 0,
   appliedPaymentAmount = 0,

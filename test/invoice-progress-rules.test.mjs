@@ -293,7 +293,7 @@ test('project overview metric rows refresh project-level derived fields', () => 
   const rows = buildProjectOverviewMetricRows({
     today,
     projects: [
-      { recordId: 'rec1', projectNo: 'P1', projectName: '项目一', currentManager: [{ id: 'u1' }], projectCategory: '经营项目', openRiskCount: 2 },
+      { recordId: 'rec1', projectNo: 'P1', projectName: '项目一', currentManager: [{ id: 'u1' }], projectCategory: '经营项目', openRiskCount: 2, supplierOutstandingAmount: 699865 },
       { recordId: 'rec2', projectNo: 'P2', projectCategory: '走账项目', projectStatus: '暂停' },
     ],
     invoices: [
@@ -325,6 +325,7 @@ test('project overview metric rows refresh project-level derived fields', () => 
   assert.equal(rows[0].fields['客户收款状态'], '部分收款');
   assert.equal(rows[0].fields['下一计划开票金额'], 400);
   assert.equal(rows[0].fields['未关闭风险数'], 2);
+  assert.equal(rows[0].fields['供应商待付款金额'], 699865);
   assert.equal(rows[0].fields['项目状态'], '进行中');
   assert.equal(rows[0].fields['系统项目状态'], '进行中');
   assert.deepEqual(rows[0].fields['应收数据粒度'], ['计划开票', '发票明细']);

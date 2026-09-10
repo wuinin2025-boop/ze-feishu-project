@@ -19,6 +19,7 @@ import {
 import { changedUpdateFields } from '../rules/sync-diff-rules.mjs';
 import {
   buildSupplierCostKey,
+  deduplicateSupplierPayments,
   deriveSupplierInvoiceStatus,
   deriveSupplierPaymentStatus,
   extractApplicationNo,
@@ -141,6 +142,7 @@ const PROJECT_OVERVIEW_FIELDS = [
   '结算金额',
   '结算成本',
   'PO金额',
+  '供应商待付款金额',
   '累计实际付款金额',
   '未关闭风险数',
   '已开票金额',
@@ -177,6 +179,7 @@ const INVOICE_DETAIL_STALE_FIELDS = [
 ];
 
 const SUPPLIER_PAYMENT_FIELDS = [
+  '付款申请编号',
   '项目编号',
   '供应商',
   '付款金额',
@@ -459,6 +462,7 @@ function normalizeProjectOverview(record) {
     settlementAmount: numberValue(fields['结算金额']) || 0,
     settlementCost: numberValue(fields['结算成本']) || 0,
     poAmount: numberValue(fields['PO金额']) || 0,
+    supplierOutstandingAmount: numberValue(fields['供应商待付款金额']) || 0,
     actualPaymentAmount: numberValue(fields['累计实际付款金额']) || 0,
     invoicedAmount: numberValue(fields['已开票金额']) || 0,
     receivedAmount: numberValue(fields['已收款金额']) || 0,
@@ -772,6 +776,8 @@ function normalizeInvoice(source, record) {
 function normalizeSupplierPayment(record) {
   const fields = record.fields || {};
   return {
+    recordId: record.record_id,
+    paymentApplicationNo: extractApplicationNo(textValue(fields['付款申请编号'])),
     projectNo: textValue(fields['项目编号']),
     supplierName: textValue(fields['供应商']),
     paymentAmount: numberValue(fields['付款金额']) || 0,
@@ -1057,6 +1063,23 @@ function attachProjectPayments(projects, payments) {
   }));
 }
 
+function attachProjectSupplierCosts(projects, supplierCostRows) {
+  const outstandingByProject = new Map();
+  for (const row of supplierCostRows) {
+    const projectNo = textValue(row['项目编号']);
+    if (!projectNo) continue;
+    const current = outstandingByProject.get(projectNo) || 0;
+    outstandingByProject.set(
+      projectNo,
+      Number((current + Number(row['未付款金额'] || 0)).toFixed(2)),
+    );
+  }
+  return projects.map((project) => ({
+    ...project,
+    supplierOutstandingAmount: outstandingByProject.get(project.projectNo) ?? 0,
+  }));
+}
+
 function maxTimestamp(values) {
   const timestamps = values.filter((value) => typeof value === 'number' && value > 0);
   return timestamps.length ? Math.max(...timestamps) : undefined;
@@ -1316,7 +1339,8 @@ try {
   const projectOverviewRecords = DRY_RUN
     ? existingProjectOverviewRecords
     : await searchAll(client, APP_TOKEN, tableIds.get(TARGET_TABLE_NAMES.projectOverview), PROJECT_OVERVIEW_FIELDS);
-  const supplierPayments = supplierPaymentRecords.map(normalizeSupplierPayment);
+  const normalizedSupplierPayments = supplierPaymentRecords.map(normalizeSupplierPayment);
+  const supplierPayments = deduplicateSupplierPayments(normalizedSupplierPayments);
   const allPoApplications = poApplicationRecords.map(normalizePoApplication);
   const allPoByApplicationNo = new Map(allPoApplications
     .filter((po) => po.applicationNo)
@@ -1346,6 +1370,10 @@ try {
     supplierPayments,
     projectOverviewRows,
   });
+  const projectOverviewRowsWithSupplierCosts = attachProjectSupplierCosts(
+    projectOverviewRows,
+    supplierCostRows,
+  );
   const supplierCostResult = await upsertByKey(
     client,
     TARGET_TABLE_NAMES.supplierCost,
@@ -1385,7 +1413,7 @@ try {
   const { plans, invoices } = attachProjects(
     mergePlanRows(sourcePlans.rows, manualOldPlans.rows),
     invoiceSources.flat(),
-    projectOverviewRows,
+    projectOverviewRowsWithSupplierCosts,
   );
   const matched = matchInvoicesToPlans(plans, invoices, { today: NOW });
 
@@ -1449,7 +1477,7 @@ try {
     tableIds.get(TARGET_TABLE_NAMES.invoiceDetail),
     staleInvoiceDetailIds,
   );
-  const projectOverviewUpdateRows = buildProjectOverviewUpdateRows(projectOverviewRows, matched);
+  const projectOverviewUpdateRows = buildProjectOverviewUpdateRows(projectOverviewRowsWithSupplierCosts, matched);
   const plannedProjectOverviewUpdates = projectOverviewUpdateRows.map((row) => ({
     record_id: row.recordId,
     fields: cleanFields(row.fields),
@@ -1476,6 +1504,7 @@ try {
       unmatched_invoice_rows: matched.invoices.filter((invoice) => ['未匹配项目', '计划外开票', '红冲待确认'].includes(invoice.matchStatus)).length,
       amount_exception_plan_rows: matched.plans.filter((plan) => plan.matchStatus === '金额异常待确认').length,
       supplier_cost_rows: supplierCostRows.length,
+      supplier_payment_duplicate_rows_ignored: normalizedSupplierPayments.length - supplierPayments.length,
       supplier_cost_unmatched_payment_rows: supplierCostRows.filter((row) => row['数据匹配状态'] === '付款未匹配PO').length,
       supplier_cost_project_unmatched_rows: supplierCostRows.filter((row) => row['数据匹配状态'] === '项目未匹配').length,
       supplier_cost_unpaid_rows: supplierCostRows.filter((row) => ['未申请付款', '已申请待付款', '部分付款'].includes(row['付款状态'])).length,
