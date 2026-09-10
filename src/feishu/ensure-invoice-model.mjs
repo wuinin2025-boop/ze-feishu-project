@@ -21,6 +21,7 @@ const FIELD_TYPES = {
   singleSelect: 3,
   date: 5,
   singleLink: 18,
+  lookup: 19,
   formula: 20,
   duplexLink: 21,
 };
@@ -124,8 +125,8 @@ const PROJECT_OVERVIEW_DESCRIPTIONS = {
   已收款金额: '本地同步按项目编号汇总开票明细统一表中纳入统计的收款金额；红冲抵消记录不纳入。',
   逾期回款金额: '本地同步按项目开票计划表汇总：已实际开票、未收齐且预计回款日期早于今天的未收款金额。',
   付款申请审批中金额: '当前本地同步脚本不写入；如需使用，应由供应商付款或飞书自动化汇总审批中的付款申请。',
-  供应商待付款金额: '本地同步按项目汇总已通过 PO 的未付款金额，即各 PO 成本金额减对应实际付款金额；仅在数据变化时更新。',
-  累计实际付款金额: '本地同步按项目编号汇总供应商付款表的实际付款金额；不使用付款申请金额替代实际付款。',
+  供应商待付款金额: '飞书实时汇总：按项目编号汇总供应商付款表的未付款金额；人工填写实际付款金额后自动变化，本地脚本不写入。',
+  累计实际付款金额: '飞书实时汇总：按项目编号汇总供应商付款表的实际付款金额；不使用付款申请金额替代实际付款，本地脚本不写入。',
   最近预计回款日期: '本地同步取项目开票计划表中未收齐期次最早的预计回款日期。',
   应收数据粒度: '本地同步标记本项目当前应收数据来源：计划开票、发票明细或项目汇总。',
   源记录ID: '本地同步写入所采用源记录的SourceID；缺失时使用飞书record_id，用于幂等同步。',
@@ -223,7 +224,7 @@ const SUPPLIER_COST_DESCRIPTIONS = {
   未付款金额: '本地同步计算：PO成本金额减实际付款金额合计，小于0按0显示。',
   付款状态: '本地同步计算：无已通过付款申请为未申请付款；有已通过申请未实际付款为已申请待付款；实际付款小于 PO 成本为部分付款；达到为已付款；超过为超额付款。',
   发票状态: '本地同步根据已通过源_付款申请的发票情况判断：全部收到为已收票，部分收到为部分收票，全部未收到为未收票，没有已通过付款申请为未申请付款。',
-  付款申请编号汇总: '本地同步汇总当前 PO 下所有付款申请编号，多个用顿号分隔。',
+  付款申请编号: '本地同步汇总当前 PO 下所有付款申请编号；一个 PO 对应多笔付款申请时，多个编号用顿号分隔。',
   最近付款申请日期: '本地同步取当前 PO 下最新一条付款申请发起时间。',
   最近预计付款日期: '本地同步取当前 PO 下最新一条付款申请付款日期。',
   最近实际付款日期: '本地同步取供应商付款表中当前 PO 最近一次实际付款日期。',
@@ -430,6 +431,7 @@ async function ensureFieldDescription(client, tableName, tableId, fieldsByName, 
   if (
     !existing
     || (!options.includeComputed && existing.type === FIELD_TYPES.singleLink)
+    || (!options.includeComputed && existing.type === FIELD_TYPES.lookup)
     || (!options.includeComputed && existing.type === FIELD_TYPES.formula)
     || existing.type === FIELD_TYPES.duplexLink
     || existing.type >= 1000
@@ -698,7 +700,7 @@ async function ensureInvoiceModel(client) {
   await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, number('未付款金额'), report);
   await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, select('付款状态', SUPPLIER_PAYMENT_STATUS_OPTIONS), report);
   await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, select('发票状态', SUPPLIER_INVOICE_STATUS_OPTIONS), report);
-  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, text('付款申请编号汇总'), report);
+  await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, text('付款申请编号'), report);
   await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, date('最近付款申请日期'), report);
   await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, date('最近预计付款日期'), report);
   await ensureField(client, TARGET_TABLE_NAMES.supplierCost, actualSupplierCostTableId, supplierCostFields, date('最近实际付款日期'), report);

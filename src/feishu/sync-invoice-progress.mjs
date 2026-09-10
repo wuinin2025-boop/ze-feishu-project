@@ -858,7 +858,7 @@ function buildSupplierPaymentRows({ paymentApplications, poApplications, project
       const project = projectByNo.get(payment.projectNo.toUpperCase());
       const po = poByApplicationNo.get(payment.linkedPoApplicationNo);
       return {
-        '付款记录标题': [payment.applicationNo, payment.projectNo || '项目未匹配', payment.supplierName || '供应商未填'].join('-'),
+        '付款记录标题': payment.applicationNo,
         '项目编号': payment.projectNo,
         '项目名称': payment.projectName,
         '供应商': payment.supplierName,
@@ -1138,23 +1138,6 @@ function attachProjectPayments(projects, payments) {
   }));
 }
 
-function attachProjectSupplierCosts(projects, supplierCostRows) {
-  const outstandingByProject = new Map();
-  for (const row of supplierCostRows) {
-    const projectNo = textValue(row['项目编号']);
-    if (!projectNo) continue;
-    const current = outstandingByProject.get(projectNo) || 0;
-    outstandingByProject.set(
-      projectNo,
-      Number((current + Number(row['未付款金额'] || 0)).toFixed(2)),
-    );
-  }
-  return projects.map((project) => ({
-    ...project,
-    supplierOutstandingAmount: outstandingByProject.get(project.projectNo) ?? 0,
-  }));
-}
-
 function maxTimestamp(values) {
   const timestamps = values.filter((value) => typeof value === 'number' && value > 0);
   return timestamps.length ? Math.max(...timestamps) : undefined;
@@ -1261,7 +1244,7 @@ function buildSupplierCostRows({ poApplications, paymentApplications, supplierPa
       '未付款金额': Math.max(Number((Number(po.costAmount || 0) - actualPaymentAmount).toFixed(2)), 0),
       '付款状态': paymentStatus,
       '发票状态': invoiceStatus,
-      '付款申请编号汇总': [...new Set(payments.map((payment) => payment.applicationNo).filter(Boolean))].join('、'),
+      '付款申请编号': [...new Set(payments.map((payment) => payment.applicationNo).filter(Boolean))].join('、'),
       '最近付款申请日期': maxTimestamp(payments.map((payment) => payment.startedAt)),
       '最近预计付款日期': maxTimestamp(payments.map((payment) => payment.expectedPaymentDate)),
       '最近实际付款日期': maxTimestamp(actual.dates),
@@ -1294,7 +1277,7 @@ function buildSupplierCostRows({ poApplications, paymentApplications, supplierPa
       '未付款金额': 0,
       '付款状态': paymentStatus,
       '发票状态': deriveSupplierInvoiceStatus([payment.invoiceStatus]),
-      '付款申请编号汇总': payment.applicationNo,
+      '付款申请编号': payment.applicationNo,
       '最近付款申请日期': payment.startedAt,
       '最近预计付款日期': payment.expectedPaymentDate,
       '数据匹配状态': matchStatus,
@@ -1479,10 +1462,6 @@ try {
     supplierPayments,
     projectOverviewRows,
   });
-  const projectOverviewRowsWithSupplierCosts = attachProjectSupplierCosts(
-    projectOverviewRows,
-    supplierCostRows,
-  );
   const supplierCostResult = await upsertByKey(
     client,
     TARGET_TABLE_NAMES.supplierCost,
@@ -1496,7 +1475,7 @@ try {
         '关联付款申请',
         'PO申请时间',
         'PO完成时间',
-        '付款申请编号汇总',
+        '付款申请编号',
         '最近付款申请日期',
         '最近预计付款日期',
         '最近实际付款日期',
@@ -1522,7 +1501,7 @@ try {
   const { plans, invoices } = attachProjects(
     mergePlanRows(sourcePlans.rows, manualOldPlans.rows),
     invoiceSources.flat(),
-    projectOverviewRowsWithSupplierCosts,
+    projectOverviewRows,
   );
   const matched = matchInvoicesToPlans(plans, invoices, { today: NOW });
 
@@ -1586,7 +1565,7 @@ try {
     tableIds.get(TARGET_TABLE_NAMES.invoiceDetail),
     staleInvoiceDetailIds,
   );
-  const projectOverviewUpdateRows = buildProjectOverviewUpdateRows(projectOverviewRowsWithSupplierCosts, matched);
+  const projectOverviewUpdateRows = buildProjectOverviewUpdateRows(projectOverviewRows, matched);
   const plannedProjectOverviewUpdates = projectOverviewUpdateRows.map((row) => ({
     record_id: row.recordId,
     fields: cleanFields(row.fields),

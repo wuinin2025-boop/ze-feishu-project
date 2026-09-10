@@ -55,11 +55,11 @@ try {
     '成本记录标题',
     '成本唯一键',
     'PO申请编号',
-    '付款申请编号汇总',
+    '付款申请编号',
   ]);
   const candidates = records.map((record) => {
     const poApplicationNo = extractApplicationNo(textValue(record.fields?.['PO申请编号']));
-    const paymentNo = paymentApplicationNo(textValue(record.fields?.['付款申请编号汇总']));
+    const paymentNo = paymentApplicationNo(textValue(record.fields?.['付款申请编号']));
     const nextKey = buildSupplierCostKey({
       poApplicationNo,
       paymentApplicationNo: poApplicationNo ? '' : paymentNo,
