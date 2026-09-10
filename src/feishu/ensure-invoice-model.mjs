@@ -383,6 +383,25 @@ async function ensureField(client, tableName, tableId, fieldsByName, desiredFiel
   }
 }
 
+async function ensureFormulaDefinition(client, tableName, tableId, fieldsByName, desiredField, report) {
+  assertWritableTableName(tableName);
+  const existing = fieldsByName.get(desiredField.field_name);
+  if (!existing) return ensureField(client, tableName, tableId, fieldsByName, desiredField, report);
+  const sameFormula = existing.type === FIELD_TYPES.formula
+    && existing.property?.formula_expression === desiredField.property?.formula_expression;
+  if (sameFormula) return existing;
+  report.planned.field_definitions.push(`${tableName}.${desiredField.field_name}`);
+  if (DRY_RUN) return existing;
+  await callJson(client, 'bitable_v1_appTableField_update', {
+    path: { app_token: APP_TOKEN, table_id: tableId, field_id: existing.field_id },
+    data: desiredField,
+  });
+  report.updated.field_definitions.push(`${tableName}.${desiredField.field_name}`);
+  const updated = { ...existing, ...desiredField };
+  fieldsByName.set(desiredField.field_name, updated);
+  return updated;
+}
+
 function fieldDescriptionText(fieldItem) {
   const description = fieldItem?.description;
   if (!description) return '';
@@ -501,9 +520,9 @@ async function ensureViews(client, tableName, tableId, viewNames, report) {
 async function ensureInvoiceModel(client) {
   const report = {
     dry_run: DRY_RUN,
-    planned: { tables: [], fields: [], field_descriptions: [], deleted_fields: [], views: [] },
+    planned: { tables: [], fields: [], field_definitions: [], field_descriptions: [], deleted_fields: [], views: [] },
     created: { tables: [], fields: [], views: [] },
-    updated: { field_descriptions: [] },
+    updated: { field_definitions: [], field_descriptions: [] },
     deleted: { fields: [] },
     skipped_formula_fields: [],
     protected_tables: [TARGET_TABLE_NAMES.oldProjectPlan],
@@ -513,6 +532,30 @@ async function ensureInvoiceModel(client) {
   const tablesByName = new Map(tables.map((table) => [table.name, table.table_id]));
   const projectOverviewId = tablesByName.get(TARGET_TABLE_NAMES.projectOverview);
   if (!projectOverviewId) throw new Error(`Target table not found: ${TARGET_TABLE_NAMES.projectOverview}`);
+
+  const supplierPaymentId = tablesByName.get(TARGET_TABLE_NAMES.supplierPayment);
+  if (supplierPaymentId) {
+    const supplierPaymentFields = new Map((await listFields(client, supplierPaymentId)).map((fieldItem) => [fieldItem.field_name, fieldItem]));
+    const paymentAmountFieldId = supplierPaymentFields.get('付款金额')?.field_id;
+    const actualPaymentAmountFieldId = supplierPaymentFields.get('实际付款金额')?.field_id;
+    if (paymentAmountFieldId && actualPaymentAmountFieldId) {
+      const paymentRef = `bitable::$table[${supplierPaymentId}].$field[${paymentAmountFieldId}]`;
+      const actualRef = `bitable::$table[${supplierPaymentId}].$field[${actualPaymentAmountFieldId}]`;
+      await ensureFormulaDefinition(
+        client,
+        TARGET_TABLE_NAMES.supplierPayment,
+        supplierPaymentId,
+        supplierPaymentFields,
+        formula(
+          '未付款金额',
+          `IF(${paymentRef}-${actualRef}>0,${paymentRef}-${actualRef},0)`,
+          2,
+          '自动计算：付款金额减实际付款金额；小于0时按0显示。',
+        ),
+        report,
+      );
+    }
+  }
 
   const overviewFields = new Map((await listFields(client, projectOverviewId)).map((fieldItem) => [fieldItem.field_name, fieldItem]));
   await ensureFieldDescriptions(

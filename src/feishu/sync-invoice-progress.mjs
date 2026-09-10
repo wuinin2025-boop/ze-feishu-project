@@ -29,6 +29,7 @@ import {
 } from '../rules/supplier-cost-rules.mjs';
 import {
   buildProjectParticipants,
+  mergeUsers,
   resolveProjectPeople,
   writableUsers,
 } from '../rules/project-personnel-rules.mjs';
@@ -179,14 +180,25 @@ const INVOICE_DETAIL_STALE_FIELDS = [
 ];
 
 const SUPPLIER_PAYMENT_FIELDS = [
+  '付款记录标题',
   '付款申请编号',
   '项目编号',
+  '项目名称',
   '供应商',
   '付款金额',
+  '预计付款日期',
   '付款状态',
   '实际付款金额',
   '实际付款日期',
+  '付款备注',
+  '付款申请时间',
+  '源付款申请记录ID',
+  '数据匹配状态',
+  '关联项目',
   '关联PO',
+  '关联付款申请',
+  '项目匹配说明',
+  '权限_可管理人员',
 ];
 
 const PO_APPLICATION_FIELDS = [
@@ -217,6 +229,8 @@ const PAYMENT_APPLICATION_FIELDS = [
   '供应商名称',
   '金额1',
   '发票情况',
+  '付款事由',
+  '备注',
   'SourceID',
 ];
 
@@ -317,6 +331,7 @@ async function tableIdByName(client) {
     TARGET_TABLE_NAMES.invoicePlan,
     TARGET_TABLE_NAMES.invoiceDetail,
     TARGET_TABLE_NAMES.supplierCost,
+    TARGET_TABLE_NAMES.supplierPayment,
   ]) {
     if (!result.has(name)) throw new Error(`Target table not found: ${name}. Run npm run setup:invoice-model first.`);
   }
@@ -824,7 +839,67 @@ function normalizePaymentApplication(record) {
     supplierName: textValue(fields['供应商名称']),
     amount: numberValue(fields['金额1']) || 0,
     invoiceStatus: textValue(fields['发票情况']),
+    remark: textValue(fields['付款事由']) || textValue(fields['备注']),
   };
+}
+
+function buildSupplierPaymentRows({ paymentApplications, poApplications, projectOverviewRows }) {
+  const projectByNo = new Map(projectOverviewRows
+    .filter((project) => project.projectNo)
+    .map((project) => [project.projectNo.toUpperCase(), project]));
+  const poByApplicationNo = new Map(poApplications
+    .filter((po) => po.applicationNo)
+    .map((po) => [po.applicationNo, po]));
+
+  return paymentApplications
+    .filter(isApprovedApplication)
+    .filter((payment) => payment.applicationNo)
+    .map((payment) => {
+      const project = projectByNo.get(payment.projectNo.toUpperCase());
+      const po = poByApplicationNo.get(payment.linkedPoApplicationNo);
+      return {
+        '付款记录标题': [payment.applicationNo, payment.projectNo || '项目未匹配', payment.supplierName || '供应商未填'].join('-'),
+        '项目编号': payment.projectNo,
+        '项目名称': payment.projectName,
+        '供应商': payment.supplierName,
+        '付款金额': payment.amount,
+        '预计付款日期': payment.expectedPaymentDate,
+        '付款状态': '审核通过待付款',
+        '实际付款金额': 0,
+        '付款备注': payment.remark,
+        '付款申请编号': payment.applicationNo,
+        '付款申请时间': payment.startedAt,
+        '源付款申请记录ID': payment.recordId,
+        '数据匹配状态': project ? '已匹配项目' : '项目未匹配',
+        '关联项目': linkField(project?.recordId),
+        '关联PO': linkField(po?.recordId),
+        '关联付款申请': linkField(payment.recordId),
+        '项目匹配说明': project ? '' : '项目编号未匹配项目总览表',
+        '权限_可管理人员': writableUsers(mergeUsers(project?.currentManager, project?.projectParticipants)),
+      };
+    });
+}
+
+function staleSupplierPaymentRecordIds(records, desiredRows) {
+  const desiredKeys = new Set(desiredRows.map((row) => textValue(row['付款申请编号'])).filter(Boolean));
+  const groups = new Map();
+  const stale = [];
+  for (const record of records) {
+    const key = extractApplicationNo(textValue(record.fields?.['付款申请编号']));
+    if (!key || !desiredKeys.has(key)) {
+      stale.push(record.record_id);
+      continue;
+    }
+    const current = groups.get(key) || [];
+    current.push(record);
+    groups.set(key, current);
+  }
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const keep = deduplicateSupplierPayments(group.map(normalizeSupplierPayment))[0]?.recordId;
+    stale.push(...group.filter((record) => record.record_id !== keep).map((record) => record.record_id));
+  }
+  return [...new Set(stale)];
 }
 
 function normalizeProjectProgress(record) {
@@ -1288,7 +1363,7 @@ try {
     sourceProjects,
     existingProjectOverviewRecords,
     oldProjectPlanRecords,
-    supplierPaymentRecords,
+    existingSupplierPaymentRecords,
     projectProgressRecords,
     poApplicationRecords,
     paymentApplicationRecords,
@@ -1339,14 +1414,48 @@ try {
   const projectOverviewRecords = DRY_RUN
     ? existingProjectOverviewRecords
     : await searchAll(client, APP_TOKEN, tableIds.get(TARGET_TABLE_NAMES.projectOverview), PROJECT_OVERVIEW_FIELDS);
-  const normalizedSupplierPayments = supplierPaymentRecords.map(normalizeSupplierPayment);
-  const supplierPayments = deduplicateSupplierPayments(normalizedSupplierPayments);
   const allPoApplications = poApplicationRecords.map(normalizePoApplication);
   const allPoByApplicationNo = new Map(allPoApplications
     .filter((po) => po.applicationNo)
     .map((po) => [po.applicationNo, po]));
   const poApplications = allPoApplications.filter(isApprovedApplication);
   const allPaymentApplications = paymentApplicationRecords.map(normalizePaymentApplication);
+  const supplierPaymentRows = buildSupplierPaymentRows({
+    paymentApplications: allPaymentApplications,
+    poApplications: allPoApplications,
+    projectOverviewRows: projectOverviewRecords.map(normalizeProjectOverview),
+  });
+  const supplierPaymentResult = await upsertByKey(
+    client,
+    TARGET_TABLE_NAMES.supplierPayment,
+    supplierPaymentTableId,
+    supplierPaymentRows,
+    '付款申请编号',
+    {
+      createOnlyFields: ['付款状态', '实际付款金额', '实际付款日期'],
+      ignoredDiffFields: ['源付款申请记录ID'],
+      clearableFields: ['关联项目', '关联PO', '关联付款申请', '项目匹配说明', '权限_可管理人员'],
+      reportField: '付款记录标题',
+    },
+  );
+  const supplierPaymentRecordsAfterUpsert = DRY_RUN
+    ? existingSupplierPaymentRecords
+    : await searchAll(client, APP_TOKEN, supplierPaymentTableId, SUPPLIER_PAYMENT_FIELDS);
+  const staleSupplierPaymentIds = staleSupplierPaymentRecordIds(
+    supplierPaymentRecordsAfterUpsert,
+    supplierPaymentRows,
+  );
+  const staleSupplierPayments = await batchDelete(
+    client,
+    TARGET_TABLE_NAMES.supplierPayment,
+    supplierPaymentTableId,
+    staleSupplierPaymentIds,
+  );
+  const supplierPaymentRecords = DRY_RUN || !staleSupplierPaymentIds.length
+    ? supplierPaymentRecordsAfterUpsert
+    : await searchAll(client, APP_TOKEN, supplierPaymentTableId, SUPPLIER_PAYMENT_FIELDS);
+  const normalizedSupplierPayments = supplierPaymentRecords.map(normalizeSupplierPayment);
+  const supplierPayments = deduplicateSupplierPayments(normalizedSupplierPayments);
   const paymentApplications = allPaymentApplications
     .filter((payment) => shouldIncludePaymentApplication(payment, allPoByApplicationNo));
   const projectProgressRows = projectProgressRecords.map(normalizeProjectProgress);
@@ -1504,6 +1613,8 @@ try {
       unmatched_invoice_rows: matched.invoices.filter((invoice) => ['未匹配项目', '计划外开票', '红冲待确认'].includes(invoice.matchStatus)).length,
       amount_exception_plan_rows: matched.plans.filter((plan) => plan.matchStatus === '金额异常待确认').length,
       supplier_cost_rows: supplierCostRows.length,
+      supplier_payment_source_approved_rows: supplierPaymentRows.length,
+      stale_supplier_payment_rows: staleSupplierPaymentIds.length,
       supplier_payment_duplicate_rows_ignored: normalizedSupplierPayments.length - supplierPayments.length,
       supplier_cost_unmatched_payment_rows: supplierCostRows.filter((row) => row['数据匹配状态'] === '付款未匹配PO').length,
       supplier_cost_project_unmatched_rows: supplierCostRows.filter((row) => row['数据匹配状态'] === '项目未匹配').length,
@@ -1528,6 +1639,11 @@ try {
     project_people_conflicts: mergedProjectOverview.conflicts,
     upsert: {
       project_overview_sources: projectOverviewResult,
+      supplier_payment: supplierPaymentResult,
+      stale_supplier_payments: {
+        planned: staleSupplierPaymentIds.length,
+        deleted: staleSupplierPayments,
+      },
       invoice_detail: invoiceResult,
       invoice_plan: planResult,
       supplier_cost: supplierCostResult,
