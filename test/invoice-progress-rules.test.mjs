@@ -8,6 +8,7 @@ import {
   buildPlanUniqueKey,
   buildProjectOverviewMetricRows,
   deriveProjectDataCompleteness,
+  deriveProjectLifecycle,
   buildProgressKey,
   classifyDashboardGroup,
   buildSplitInvoiceNodes,
@@ -88,6 +89,8 @@ test('dashboard grouping follows manual project classification', () => {
 
 test('project stages are derived from real project progress', () => {
   assert.deepEqual(deriveProjectStages({ projectNo: '' }), ['预立项']);
+  assert.deepEqual(deriveProjectStages({ projectNo: 'P0', preEstablishment: true }), ['预立项']);
+  assert.deepEqual(deriveProjectStages({ projectNo: 'P0', preEstablishment: true, poAmount: 100 }), ['预立项', 'PO']);
   assert.deepEqual(deriveProjectStages({
     projectNo: 'P1',
     establishmentAmount: 1000,
@@ -335,4 +338,19 @@ test('project overview metric rows refresh project-level derived fields', () => 
 test('project completeness uses the current manager stored in project overview', () => {
   assert.equal(deriveProjectDataCompleteness({ projectNo: 'P1', projectName: '项目一', currentManager: [] }), '待补充');
   assert.equal(deriveProjectDataCompleteness({ projectNo: 'P1', projectName: '项目一', currentManager: [{ id: 'u1' }] }), '完整');
+});
+
+test('project lifecycle separates pure pre-establishment from later formal progress', () => {
+  assert.deepEqual(deriveProjectLifecycle({ hasPreEstablishment: true }), {
+    preEstablishment: true,
+    clearEstablishment: true,
+  });
+  assert.deepEqual(deriveProjectLifecycle({ hasPreEstablishment: true, hasSettlement: true }), {
+    preEstablishment: false,
+    clearEstablishment: true,
+  });
+  assert.deepEqual(deriveProjectLifecycle({ hasPreEstablishment: true, hasEstablishment: true }), {
+    preEstablishment: false,
+    clearEstablishment: false,
+  });
 });

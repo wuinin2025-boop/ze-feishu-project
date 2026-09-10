@@ -58,6 +58,13 @@ export function deriveProjectDataCompleteness({ projectNo, projectName, currentM
   return projectNo && projectName && hasManager ? '完整' : '待补充';
 }
 
+export function deriveProjectLifecycle({ hasPreEstablishment, hasEstablishment, hasSettlement, hasLedgerEstablishment }) {
+  return {
+    preEstablishment: Boolean(hasPreEstablishment && !hasEstablishment && !hasSettlement),
+    clearEstablishment: Boolean(hasPreEstablishment && !hasEstablishment && !hasLedgerEstablishment),
+  };
+}
+
 export function classifyDashboardGroup(category) {
   const value = String(category || '').trim();
   if (value === '经营项目') return '经营项目总览';
@@ -514,6 +521,7 @@ export function deriveProfitRateWarning({ amount = 0, rate }) {
 
 export function deriveProjectStages({
   projectNo,
+  preEstablishment = false,
   establishmentAmount = 0,
   establishmentCost = 0,
   settlementAmount = 0,
@@ -523,7 +531,11 @@ export function deriveProjectStages({
   invoiceAmount = 0,
   actualPaymentAmount = 0,
 }) {
-  if (!String(projectNo || '').trim()) return ['预立项'];
+  if (!String(projectNo || '').trim() || preEstablishment) {
+    const stages = ['预立项'];
+    if (Number(poAmount || 0) > 0) stages.push('PO');
+    return stages;
+  }
 
   const stages = ['立项'];
   const invoiceTarget = Number(plannedAmount || 0)
@@ -609,6 +621,7 @@ export function buildProjectOverviewMetricRows({ projects, plans, invoices, toda
         }),
         '项目阶段': deriveProjectStages({
           projectNo: project.projectNo,
+          preEstablishment: project.preEstablishment,
           establishmentAmount: project.establishmentAmount,
           establishmentCost: project.establishmentCost,
           settlementAmount: project.settlementAmount,

@@ -11,6 +11,7 @@ import {
   buildProjectOverviewMetricRows,
   classifyApplication,
   deriveProfitRateWarning,
+  deriveProjectLifecycle,
   deriveProjectStages,
   matchInvoicesToPlans,
   normalizeInvoiceNo,
@@ -517,10 +518,15 @@ function normalizeLedgerProject(source, record) {
 function normalizeEstablishmentProject(record) {
   const fields = record.fields || {};
   const projectNo = textValue(fields['项目编号']);
-  const establishmentAmount = numberValue(fields['项目立项_立项金额']) ?? numberValue(fields['预立项_预立项金额']);
-  const establishmentCost = numberValue(fields['项目立项_立项成本']) ?? numberValue(fields['预立项_预立项成本']);
+  const preEstablishmentAmount = numberValue(fields['预立项_预立项金额']);
+  const preEstablishmentCost = numberValue(fields['预立项_预立项成本']);
+  const establishmentAmount = numberValue(fields['项目立项_立项金额']);
+  const establishmentCost = numberValue(fields['项目立项_立项成本']);
   const settlementAmount = numberValue(fields['项目结算_结算金额（开票）']);
   const settlementCost = numberValue(fields['项目结算_结算成本']);
+  const hasPreEstablishment = preEstablishmentAmount !== undefined || preEstablishmentCost !== undefined;
+  const hasEstablishment = establishmentAmount !== undefined || establishmentCost !== undefined;
+  const hasSettlement = settlementAmount !== undefined || settlementCost !== undefined;
   const manager = userFieldRefs(fields['团队信息_项目负责人']);
   const participants = buildProjectParticipants({
     manager,
@@ -533,6 +539,7 @@ function normalizeEstablishmentProject(record) {
   return {
     projectNo,
     peopleSource: 'establishment',
+    lifecycleKind: hasEstablishment ? 'establishment' : hasSettlement ? 'settlement' : hasPreEstablishment ? 'pre-establishment' : 'unknown',
     people: { manager: manager || [], participants },
     row: {
       '项目编号': projectNo,
@@ -582,6 +589,8 @@ function mergeProjectRows(projectRows) {
   const rows = [];
   const conflicts = [];
   const peopleByProjectNo = new Map();
+  const preEstablishmentByProjectNo = new Map();
+  const clearEstablishmentByProjectNo = new Map();
   for (const [projectNo, items] of itemsByProjectNo) {
     let existing = {};
     for (const item of items) {
@@ -604,6 +613,31 @@ function mergeProjectRows(projectRows) {
       ledgerRows: items.filter((item) => item.peopleSource === 'ledger').map((item) => item.people),
     });
     peopleByProjectNo.set(projectNo, people);
+    const lifecycleKinds = new Set(items.map((item) => item.lifecycleKind).filter(Boolean));
+    const hasLedgerEstablishment = items.some((item) => item.peopleSource === 'ledger'
+      && (numberValue(item.row?.['立项金额']) !== undefined || numberValue(item.row?.['立项成本']) !== undefined));
+    const { preEstablishment, clearEstablishment } = deriveProjectLifecycle({
+      hasPreEstablishment: lifecycleKinds.has('pre-establishment'),
+      hasEstablishment: lifecycleKinds.has('establishment'),
+      hasSettlement: lifecycleKinds.has('settlement'),
+      hasLedgerEstablishment,
+    });
+    preEstablishmentByProjectNo.set(projectNo, preEstablishment);
+    clearEstablishmentByProjectNo.set(projectNo, clearEstablishment);
+    if (clearEstablishment) {
+      existing['立项金额'] = null;
+      existing['立项成本'] = null;
+      existing['立项毛利'] = null;
+      existing['立项毛利率'] = null;
+      existing['立项毛利率预警'] = '未计算';
+    }
+    if (preEstablishment) {
+      existing['项目阶段'] = deriveProjectStages({
+        projectNo,
+        preEstablishment: true,
+        poAmount: numberValue(existing['PO金额']),
+      });
+    }
     if (people.conflict) {
       conflicts.push({
         projectNo,
@@ -620,7 +654,14 @@ function mergeProjectRows(projectRows) {
     }
     rows.push(existing);
   }
-  return { rows, conflicts, peopleByProjectNo };
+  return { rows, conflicts, peopleByProjectNo, preEstablishmentByProjectNo, clearEstablishmentByProjectNo };
+}
+
+function attachProjectLifecycle(projects, preEstablishmentByProjectNo) {
+  return projects.map((project) => ({
+    ...project,
+    preEstablishment: preEstablishmentByProjectNo.get(project.projectNo) === true,
+  }));
 }
 
 function peopleNames(users) {
@@ -1182,6 +1223,7 @@ function buildProjectProgressCreateRows(projects, progressRows) {
   const rows = [];
   for (const project of projects) {
     if (!project.recordId || !project.projectNo) continue;
+    if (project.preEstablishment) continue;
     if (project.projectCategory !== '经营项目') continue;
     if (existingProjectNos.has(project.projectNo)) continue;
     rows.push({
@@ -1267,6 +1309,7 @@ try {
       createOnlyFields: ['项目阶段', '已收款金额'],
       fillEmptyFields: ['当前项目负责人', '项目参与人员'],
       ignoredDiffFields: ['源记录ID'],
+      clearableFields: ['立项金额', '立项成本', '立项毛利', '立项毛利率'],
     },
   );
 
@@ -1284,7 +1327,10 @@ try {
     .filter((payment) => shouldIncludePaymentApplication(payment, allPoByApplicationNo));
   const projectProgressRows = projectProgressRecords.map(normalizeProjectProgress);
   const projectOverviewRows = attachProjectRisks(
-    attachProjectPayments(projectOverviewRecords.map(normalizeProjectOverview), supplierPayments),
+    attachProjectPayments(
+      attachProjectLifecycle(projectOverviewRecords.map(normalizeProjectOverview), mergedProjectOverview.preEstablishmentByProjectNo),
+      supplierPayments,
+    ),
     projectProgressRows,
   );
   const projectProgressCreateRows = buildProjectProgressCreateRows(projectOverviewRows, projectProgressRows);
@@ -1438,6 +1484,8 @@ try {
       supplier_cost_skipped_unapproved_po_rows: allPoApplications.length - poApplications.length,
       supplier_cost_skipped_unapproved_payment_rows: allPaymentApplications.length - paymentApplications.length,
       project_people_conflict_count: mergedProjectOverview.conflicts.length,
+      pre_establishment_project_count: [...mergedProjectOverview.preEstablishmentByProjectNo.values()].filter(Boolean).length,
+      cleared_misused_pre_establishment_amount_count: [...mergedProjectOverview.clearEstablishmentByProjectNo.values()].filter(Boolean).length,
       project_manager_fill_count: projectPeopleRepairs.filter((item) => item.manager.length).length,
       project_participant_fill_count: projectPeopleRepairs.filter((item) => item.participants.length).length,
       project_overview_updates: projectOverviewUpdates.length,
