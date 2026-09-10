@@ -49,6 +49,18 @@ const ESTABLISHMENT_FIELDS = [
   '项目编号',
   '项目名称',
   '客户名称',
+  '立项公司',
+  '项目类型',
+  '预立项_预立项金额',
+  '预立项_预立项成本',
+  '项目立项_立项金额',
+  '项目立项_立项成本',
+  '项目立项_立项毛利',
+  '项目立项_立项毛利率',
+  '项目结算_结算金额（开票）',
+  '项目结算_结算成本',
+  '项目结算_结算毛利',
+  '项目结算_结算毛利率',
   '预计开票总次数',
   '开票计划（根据合同约定开票频次新增对应明细）_开票期次(次)',
   '开票计划（根据合同约定开票频次新增对应明细）_预计开票日期',
@@ -392,6 +404,7 @@ async function upsertByKey(client, tableName, tableId, rows, keyField, options =
   const updates = [];
   const createdKeys = [];
   const updatedKeys = [];
+  const updatedFieldCounts = new Map();
   const reportField = options.reportField || keyField;
   let skippedUnchanged = 0;
   for (const row of rows) {
@@ -403,6 +416,10 @@ async function upsertByKey(client, tableName, tableId, rows, keyField, options =
       if (Object.keys(fields).length) {
         updates.push({ record_id: existing.record_id, fields });
         updatedKeys.push(textValue(row[reportField]) || key);
+        for (const fieldName of Object.keys(fields)) {
+          if (['最近同步时间', '源更新时间', '源记录ID'].includes(fieldName)) continue;
+          updatedFieldCounts.set(fieldName, (updatedFieldCounts.get(fieldName) || 0) + 1);
+        }
       } else {
         skippedUnchanged += 1;
       }
@@ -418,6 +435,7 @@ async function upsertByKey(client, tableName, tableId, rows, keyField, options =
     updated: await batchUpdate(client, tableName, tableId, updates),
     created_key_count: createdKeys.length,
     updated_key_count: updatedKeys.length,
+    updated_field_counts: Object.fromEntries([...updatedFieldCounts.entries()].sort()),
     skipped_unchanged_count: skippedUnchanged,
     key_display_limit: REPORT_KEY_LIMIT,
     created_keys: createdKeys.slice(0, REPORT_KEY_LIMIT),
@@ -499,8 +517,8 @@ function normalizeLedgerProject(source, record) {
 function normalizeEstablishmentProject(record) {
   const fields = record.fields || {};
   const projectNo = textValue(fields['项目编号']);
-  const establishmentAmount = numberValue(fields['项目立项_立项金额']) || numberValue(fields['预立项_预立项金额']);
-  const establishmentCost = numberValue(fields['项目立项_立项成本']) || numberValue(fields['预立项_预立项成本']);
+  const establishmentAmount = numberValue(fields['项目立项_立项金额']) ?? numberValue(fields['预立项_预立项金额']);
+  const establishmentCost = numberValue(fields['项目立项_立项成本']) ?? numberValue(fields['预立项_预立项成本']);
   const settlementAmount = numberValue(fields['项目结算_结算金额（开票）']);
   const settlementCost = numberValue(fields['项目结算_结算成本']);
   const manager = userFieldRefs(fields['团队信息_项目负责人']);
@@ -529,7 +547,6 @@ function normalizeEstablishmentProject(record) {
         settlementAmount,
         settlementCost,
       }),
-      '项目描述': textValue(fields['项目描述']),
       '当前项目负责人': writableUsers(manager),
       '源项目负责人': writableUsers(manager),
       '项目参与人员': writableUsers(participants),
@@ -572,6 +589,7 @@ function mergeProjectRows(projectRows) {
       for (const [key, value] of Object.entries(item.row)) {
         if (['当前项目负责人', '源项目负责人', '项目参与人员'].includes(key)) continue;
         if (value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) continue;
+        if (key === '立项公司' && item.peopleSource === 'establishment' && textValue(merged[key])) continue;
         if (key === '数据来源') {
           merged[key] = [...new Set([...(merged[key] || []), ...value])];
           continue;
