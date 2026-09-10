@@ -5,11 +5,11 @@ export function extractApplicationNo(value) {
   return match?.[0] || '';
 }
 
-export function buildSupplierCostKey({ poSourceId, poRecordId, paymentSourceId, paymentRecordId }) {
-  if (poSourceId) return `PO|${poSourceId}`;
-  if (poRecordId) return `PO|${poRecordId}`;
-  if (paymentSourceId) return `付款未匹配PO|${paymentSourceId}`;
-  if (paymentRecordId) return `付款未匹配PO|${paymentRecordId}`;
+export function buildSupplierCostKey({ poApplicationNo, paymentApplicationNo }) {
+  const poNo = String(poApplicationNo || '').trim();
+  const paymentNo = String(paymentApplicationNo || '').trim();
+  if (poNo) return `PO|${poNo}`;
+  if (paymentNo) return `付款未匹配PO|${paymentNo}`;
   return '';
 }
 

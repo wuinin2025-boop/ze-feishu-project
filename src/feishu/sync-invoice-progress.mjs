@@ -26,6 +26,11 @@ import {
   supplierMatchStatus,
 } from '../rules/supplier-cost-rules.mjs';
 import {
+  buildProjectParticipants,
+  resolveProjectPeople,
+  writableUsers,
+} from '../rules/project-personnel-rules.mjs';
+import {
   callJson,
   connectFeishu,
   numberValue,
@@ -49,6 +54,10 @@ const ESTABLISHMENT_FIELDS = [
   '开票计划（根据合同约定开票频次新增对应明细）_预计开票日期',
   '开票计划（根据合同约定开票频次新增对应明细）_预计开票金额',
   '开票计划（根据合同约定开票频次新增对应明细）_预计回款日期',
+  '团队信息_项目负责人',
+  '团队信息_策划',
+  '团队信息_设计',
+  '团队信息_执行',
   'SourceID',
 ];
 
@@ -109,6 +118,8 @@ const PROJECT_OVERVIEW_FIELDS = [
   '项目编号',
   '项目名称',
   '项目分类管理',
+  '当前项目负责人',
+  '项目参与人员',
   '项目状态',
   '系统项目状态',
   '项目阶段',
@@ -133,6 +144,7 @@ const PROJECT_OVERVIEW_FIELDS = [
   '客户收款状态',
   '开票计划预警',
   '回款计划预警',
+  '数据完整性状态',
   '应收数据粒度',
   '开票回款计划说明',
   '最近同步时间',
@@ -258,12 +270,11 @@ function singleSelectValue(value) {
   return textValue(value) || undefined;
 }
 
-function userFieldValue(value) {
+function userFieldRefs(value) {
   if (!Array.isArray(value) || value.length === 0) return undefined;
   const users = value
-    .map((item) => item?.id)
-    .filter(Boolean)
-    .map((id) => ({ id }));
+    .filter((item) => item?.id)
+    .map((item) => ({ id: item.id, ...(item.name ? { name: item.name } : {}) }));
   return users.length ? users : undefined;
 }
 
@@ -422,6 +433,8 @@ function normalizeProjectOverview(record) {
     projectName: textValue(fields['项目名称']),
     projectCategory: textValue(fields['项目分类管理']),
     projectStatus: textValue(fields['项目状态']),
+    currentManager: userFieldRefs(fields['当前项目负责人']) || [],
+    projectParticipants: userFieldRefs(fields['项目参与人员']) || [],
     establishmentAmount: numberValue(fields['立项金额']) || 0,
     establishmentCost: numberValue(fields['立项成本']) || 0,
     settlementAmount: numberValue(fields['结算金额']) || 0,
@@ -438,10 +451,6 @@ function normalizeProjectOverview(record) {
   };
 }
 
-function dataCompleteness({ projectNo, projectName, manager }) {
-  return projectNo && projectName && (Array.isArray(manager) ? manager.length > 0 : Boolean(manager)) ? '完整' : '待补充';
-}
-
 function normalizeLedgerProject(source, record) {
   const fields = record.fields || {};
   const projectNo = textValue(fields['项目编号']);
@@ -450,9 +459,11 @@ function normalizeLedgerProject(source, record) {
   const settlementAmount = numberValue(fields['结算金额']);
   const settlementCost = numberValue(fields['结算成本']);
   const poAmount = numberValue(fields['PO成本']);
-  const manager = userFieldValue(fields['项目负责人']);
+  const manager = userFieldRefs(fields['项目负责人']);
   return {
     projectNo,
+    peopleSource: 'ledger',
+    people: { manager: manager || [], participants: [] },
     row: {
       '项目编号': projectNo,
       '项目名称': textValue(fields['项目名称']),
@@ -467,8 +478,8 @@ function normalizeLedgerProject(source, record) {
         settlementCost,
         poAmount,
       }),
-      '当前项目负责人': manager,
-      '源项目负责人': manager,
+      '当前项目负责人': writableUsers(manager),
+      '源项目负责人': writableUsers(manager),
       '立项金额': establishmentAmount,
       '立项成本': establishmentCost,
       'PO金额': poAmount,
@@ -480,7 +491,6 @@ function normalizeLedgerProject(source, record) {
       '源更新时间': NOW,
       '最近同步时间': NOW,
       '同步状态': '正常',
-      '数据完整性状态': dataCompleteness({ projectNo, projectName: textValue(fields['项目名称']), manager }),
       '项目编号异常': projectNo ? '正常' : '缺失',
     },
   };
@@ -493,11 +503,19 @@ function normalizeEstablishmentProject(record) {
   const establishmentCost = numberValue(fields['项目立项_立项成本']) || numberValue(fields['预立项_预立项成本']);
   const settlementAmount = numberValue(fields['项目结算_结算金额（开票）']);
   const settlementCost = numberValue(fields['项目结算_结算成本']);
-  const manager = userFieldValue(fields['团队信息_项目负责人']);
+  const manager = userFieldRefs(fields['团队信息_项目负责人']);
+  const participants = buildProjectParticipants({
+    manager,
+    planners: userFieldRefs(fields['团队信息_策划']),
+    designers: userFieldRefs(fields['团队信息_设计']),
+    executors: userFieldRefs(fields['团队信息_执行']),
+  });
   const establishmentProfitRate = numberValue(fields['项目立项_立项毛利率']);
   const settlementProfitRate = numberValue(fields['项目结算_结算毛利率']);
   return {
     projectNo,
+    peopleSource: 'establishment',
+    people: { manager: manager || [], participants },
     row: {
       '项目编号': projectNo,
       '项目名称': textValue(fields['项目名称']),
@@ -512,8 +530,9 @@ function normalizeEstablishmentProject(record) {
         settlementCost,
       }),
       '项目描述': textValue(fields['项目描述']),
-      '当前项目负责人': manager,
-      '源项目负责人': manager,
+      '当前项目负责人': writableUsers(manager),
+      '源项目负责人': writableUsers(manager),
+      '项目参与人员': writableUsers(participants),
       '立项金额': establishmentAmount,
       '立项成本': establishmentCost,
       '结算金额': settlementAmount,
@@ -529,29 +548,88 @@ function normalizeEstablishmentProject(record) {
       '源更新时间': NOW,
       '最近同步时间': NOW,
       '同步状态': '正常',
-      '数据完整性状态': dataCompleteness({ projectNo, projectName: textValue(fields['项目名称']), manager }),
       '项目编号异常': projectNo ? '正常' : '缺失',
     },
   };
 }
 
 function mergeProjectRows(projectRows) {
-  const rowsByProjectNo = new Map();
+  const itemsByProjectNo = new Map();
   for (const item of projectRows) {
     if (!item.projectNo) continue;
-    const existing = rowsByProjectNo.get(item.projectNo) || {};
-    const merged = { ...existing };
-    for (const [key, value] of Object.entries(item.row)) {
-      if (value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) continue;
-      if (key === '数据来源') {
-        merged[key] = [...new Set([...(merged[key] || []), ...value])];
-        continue;
-      }
-      merged[key] = value;
-    }
-    rowsByProjectNo.set(item.projectNo, merged);
+    const items = itemsByProjectNo.get(item.projectNo) || [];
+    items.push(item);
+    itemsByProjectNo.set(item.projectNo, items);
   }
-  return [...rowsByProjectNo.values()];
+
+  const rows = [];
+  const conflicts = [];
+  const peopleByProjectNo = new Map();
+  for (const [projectNo, items] of itemsByProjectNo) {
+    let existing = {};
+    for (const item of items) {
+      const merged = { ...existing };
+      for (const [key, value] of Object.entries(item.row)) {
+        if (['当前项目负责人', '源项目负责人', '项目参与人员'].includes(key)) continue;
+        if (value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) continue;
+        if (key === '数据来源') {
+          merged[key] = [...new Set([...(merged[key] || []), ...value])];
+          continue;
+        }
+        merged[key] = value;
+      }
+      existing = merged;
+    }
+
+    const people = resolveProjectPeople({
+      establishmentRows: items.filter((item) => item.peopleSource === 'establishment').map((item) => item.people),
+      ledgerRows: items.filter((item) => item.peopleSource === 'ledger').map((item) => item.people),
+    });
+    peopleByProjectNo.set(projectNo, people);
+    if (people.conflict) {
+      conflicts.push({
+        projectNo,
+        projectName: textValue(existing['项目名称']),
+        source: people.conflict.source,
+        people: people.conflict.people,
+      });
+    } else {
+      if (people.manager.length) {
+        existing['当前项目负责人'] = writableUsers(people.manager);
+        existing['源项目负责人'] = writableUsers(people.manager);
+      }
+      if (people.participants.length) existing['项目参与人员'] = writableUsers(people.participants);
+    }
+    rows.push(existing);
+  }
+  return { rows, conflicts, peopleByProjectNo };
+}
+
+function peopleNames(users) {
+  return (users || []).map((user) => user.name || user.id).filter(Boolean);
+}
+
+function plannedProjectPeopleRepairs(existingRecords, sourceRows, peopleByProjectNo) {
+  const existingByProjectNo = new Map(existingRecords
+    .map((record) => [textValue(record.fields?.['项目编号']), record])
+    .filter(([projectNo]) => projectNo));
+  return sourceRows.flatMap((row) => {
+    const projectNo = textValue(row['项目编号']);
+    const existing = existingByProjectNo.get(projectNo);
+    const sourcePeople = peopleByProjectNo.get(projectNo);
+    if (!existing || !sourcePeople || sourcePeople.conflict) return [];
+    const currentManager = userFieldRefs(existing.fields?.['当前项目负责人']) || [];
+    const currentParticipants = userFieldRefs(existing.fields?.['项目参与人员']) || [];
+    const manager = currentManager.length ? [] : peopleNames(sourcePeople.manager);
+    const participants = currentParticipants.length ? [] : peopleNames(sourcePeople.participants);
+    if (!manager.length && !participants.length) return [];
+    return [{
+      projectNo,
+      projectName: textValue(row['项目名称']),
+      manager,
+      participants,
+    }];
+  });
 }
 
 function normalizePlanSource(record) {
@@ -1001,7 +1079,7 @@ function buildSupplierCostRows({ poApplications, paymentApplications, supplierPa
       projectRecordId: project?.recordId,
       paymentRecordIds: payments.map((payment) => payment.recordId),
     });
-    const key = buildSupplierCostKey({ poSourceId: po.sourceId, poRecordId: po.recordId });
+    const key = buildSupplierCostKey({ poApplicationNo: po.applicationNo });
     const titleParts = [po.projectNo || '项目未匹配', po.supplierName || '供应商未填', po.applicationNo || po.recordId].filter(Boolean);
     rows.push({
       '成本记录标题': titleParts.join('-'),
@@ -1048,7 +1126,7 @@ function buildSupplierCostRows({ poApplications, paymentApplications, supplierPa
     });
     rows.push({
       '成本记录标题': [payment.projectNo || '项目未匹配', payment.supplierName || '供应商未填', payment.applicationNo || payment.recordId].filter(Boolean).join('-'),
-      '成本唯一键': buildSupplierCostKey({ paymentSourceId: payment.sourceId, paymentRecordId: payment.recordId }),
+      '成本唯一键': buildSupplierCostKey({ paymentApplicationNo: payment.applicationNo }),
       '关联项目': linkField(project?.recordId),
       '关联付款申请': linkField(payment.recordId),
       '项目编号': payment.projectNo,
@@ -1149,19 +1227,29 @@ try {
 
   const sourcePlans = sourcePlanRows(sourceProjects.map(normalizePlanSource));
   const manualOldPlans = oldPlanRows(oldProjectPlanRecords.map(normalizeOldPlanSource));
-  const projectOverviewSourceRows = mergeProjectRows([
+  const mergedProjectOverview = mergeProjectRows([
     ...projectLedgerGroups.flat(),
     ...sourceProjects
       .filter((record) => textValue(record.fields?.['申请状态']) === '已通过')
       .map(normalizeEstablishmentProject),
   ]);
+  const projectOverviewSourceRows = mergedProjectOverview.rows;
+  const projectPeopleRepairs = plannedProjectPeopleRepairs(
+    existingProjectOverviewRecords,
+    projectOverviewSourceRows,
+    mergedProjectOverview.peopleByProjectNo,
+  );
   const projectOverviewResult = await upsertByKey(
     client,
     TARGET_TABLE_NAMES.projectOverview,
     tableIds.get(TARGET_TABLE_NAMES.projectOverview),
     projectOverviewSourceRows,
     '项目编号',
-    { createOnlyFields: ['当前项目负责人', '项目参与人员', '项目阶段', '已收款金额'] },
+    {
+      createOnlyFields: ['项目阶段', '已收款金额'],
+      fillEmptyFields: ['当前项目负责人', '项目参与人员'],
+      ignoredDiffFields: ['源记录ID'],
+    },
   );
 
   const projectOverviewRecords = DRY_RUN
@@ -1331,6 +1419,9 @@ try {
       stale_supplier_cost_rows: staleSupplierCostIds.length,
       supplier_cost_skipped_unapproved_po_rows: allPoApplications.length - poApplications.length,
       supplier_cost_skipped_unapproved_payment_rows: allPaymentApplications.length - paymentApplications.length,
+      project_people_conflict_count: mergedProjectOverview.conflicts.length,
+      project_manager_fill_count: projectPeopleRepairs.filter((item) => item.manager.length).length,
+      project_participant_fill_count: projectPeopleRepairs.filter((item) => item.participants.length).length,
       project_overview_updates: projectOverviewUpdates.length,
       project_overview_unchanged_rows: projectOverviewChanges.skipped.length,
       project_progress_created_candidates: projectProgressCreateRows.length,
@@ -1338,6 +1429,8 @@ try {
       ...sourcePlans.stats,
       ...manualOldPlans.stats,
     },
+    project_people_repairs: projectPeopleRepairs,
+    project_people_conflicts: mergedProjectOverview.conflicts,
     upsert: {
       project_overview_sources: projectOverviewResult,
       invoice_detail: invoiceResult,

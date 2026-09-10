@@ -1,0 +1,15 @@
+[Unit]
+Description=ZE Feishu scheduled project/invoice/supplier sync
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=1800
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/ze-feishu-project
+Environment=NODE_ENV=production
+Environment=CODEX_CONFIG_PATH=/opt/ze-feishu-project/feishu-config.toml
+ExecStart=/usr/bin/flock -n /tmp/ze-feishu-sync.lock /bin/bash -lc '/usr/bin/npm run sync:invoice && /usr/bin/npm run verify:invoice'
+Restart=on-failure
+RestartSec=300

@@ -6,6 +6,7 @@
   "scripts": {
     "test": "node --test",
     "setup:invoice-model": "node src/feishu/ensure-invoice-model.mjs",
+    "migrate:supplier-cost-keys": "node src/feishu/migrate-supplier-cost-keys.mjs",
     "sync:invoice": "node src/feishu/sync-invoice-progress.mjs",
     "verify:invoice": "node src/feishu/verify-invoice-progress.mjs",
     "control": "node src/control-server.mjs"

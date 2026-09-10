@@ -17,8 +17,9 @@ test('extracts PO application number from payment link text', () => {
 });
 
 test('builds stable supplier cost key from PO first', () => {
-  assert.equal(buildSupplierCostKey({ poSourceId: 'src_po', paymentSourceId: 'src_pay' }), 'PO|src_po');
-  assert.equal(buildSupplierCostKey({ paymentSourceId: 'src_pay' }), '付款未匹配PO|src_pay');
+  assert.equal(buildSupplierCostKey({ poApplicationNo: '202510090004', paymentApplicationNo: '202609080001' }), 'PO|202510090004');
+  assert.equal(buildSupplierCostKey({ paymentApplicationNo: '202609080001' }), '付款未匹配PO|202609080001');
+  assert.equal(buildSupplierCostKey({ poSourceId: 'unstable-source-id' }), '');
 });
 
 test('derives supplier payment status from PO and actual payment amounts', () => {

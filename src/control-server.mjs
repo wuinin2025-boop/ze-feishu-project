@@ -111,6 +111,8 @@ function summarizeRun(syncResult, verifyResult) {
       protected_tables: sync.protected_tables || [],
       stats: sync.stats || {},
       upsert: sync.upsert || {},
+      project_people_repairs: sync.project_people_repairs || [],
+      project_people_conflicts: sync.project_people_conflicts || [],
     },
     verify: {
       pass: verify.pass,
@@ -280,10 +282,23 @@ function html() {
       return '<ul>' + reminders.map((item) => '<li>' + escapeHtml(item) + '</li>').join('') + '</ul>';
     }
 
-    function renderDetails(summary, stats, upsert, verify) {
+    function renderPeople(items, conflicts) {
+      const repaired = (items || []).map((item) => {
+        const parts = [];
+        if (item.manager?.length) parts.push('负责人：' + item.manager.join('、'));
+        if (item.participants?.length) parts.push('参与人员：' + item.participants.join('、'));
+        return '<li>' + escapeHtml(item.projectNo + ' ' + item.projectName + '，' + parts.join('；')) + '</li>';
+      });
+      const conflictItems = (conflicts || []).map((item) => '<li>' + escapeHtml(item.projectNo + ' ' + item.projectName + '，负责人来源冲突：' + item.people.join('、')) + '</li>');
+      if (!repaired.length && !conflictItems.length) return '<div class="muted">本次没有补齐人员，也没有人员冲突。</div>';
+      return '<ul>' + repaired.concat(conflictItems).join('') + '</ul>';
+    }
+
+    function renderDetails(summary, stats, upsert, verify, sync) {
       return [
         '<div class="detail-section"><h3>本次新增记录</h3>' + renderKeyGroup(upsert, 'created_keys', '本次没有新增记录。') + '</div>',
         '<div class="detail-section"><h3>本次更新记录</h3>' + renderKeyGroup(upsert, 'updated_keys', '本次没有更新记录。') + '</div>',
+        '<div class="detail-section"><h3>项目人员补齐</h3>' + renderPeople(sync.project_people_repairs, sync.project_people_conflicts) + '</div>',
         '<div class="detail-section"><h3>需要人工确认</h3>' + renderReminders(stats, verify) + '</div>',
       ].join('');
     }
@@ -313,7 +328,7 @@ function html() {
       ].join('');
       createdEl.innerHTML = listKeys(upsert, 'created_keys');
       updatedEl.innerHTML = listKeys(upsert, 'updated_keys');
-      detailListEl.innerHTML = renderDetails(summary, stats, upsert, verify);
+      detailListEl.innerHTML = renderDetails(summary, stats, upsert, verify, sync);
       statusEl.textContent = '最近运行：' + new Date().toLocaleString();
       statusEl.className = pass ? 'ok' : 'bad';
     }

@@ -7,6 +7,7 @@ import {
   buildOldProjectNodes,
   buildPlanUniqueKey,
   buildProjectOverviewMetricRows,
+  deriveProjectDataCompleteness,
   buildProgressKey,
   classifyDashboardGroup,
   buildSplitInvoiceNodes,
@@ -289,7 +290,7 @@ test('project overview metric rows refresh project-level derived fields', () => 
   const rows = buildProjectOverviewMetricRows({
     today,
     projects: [
-      { recordId: 'rec1', projectNo: 'P1', projectCategory: '经营项目', openRiskCount: 2 },
+      { recordId: 'rec1', projectNo: 'P1', projectName: '项目一', currentManager: [{ id: 'u1' }], projectCategory: '经营项目', openRiskCount: 2 },
       { recordId: 'rec2', projectNo: 'P2', projectCategory: '走账项目', projectStatus: '暂停' },
     ],
     invoices: [
@@ -325,7 +326,13 @@ test('project overview metric rows refresh project-level derived fields', () => 
   assert.equal(rows[0].fields['系统项目状态'], '进行中');
   assert.deepEqual(rows[0].fields['应收数据粒度'], ['计划开票', '发票明细']);
   assert.deepEqual(rows[0].fields['项目阶段'], ['立项', '部分开票']);
+  assert.equal(rows[0].fields['数据完整性状态'], '完整');
   assert.equal(rows[1].fields['项目状态'], '暂停');
   assert.equal(rows[1].fields['系统项目状态'], '进行中');
   assert.deepEqual(rows[1].fields['应收数据粒度'], ['项目汇总']);
+});
+
+test('project completeness uses the current manager stored in project overview', () => {
+  assert.equal(deriveProjectDataCompleteness({ projectNo: 'P1', projectName: '项目一', currentManager: [] }), '待补充');
+  assert.equal(deriveProjectDataCompleteness({ projectNo: 'P1', projectName: '项目一', currentManager: [{ id: 'u1' }] }), '完整');
 });

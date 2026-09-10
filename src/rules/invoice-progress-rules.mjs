@@ -51,6 +51,13 @@ export function buildPlanUniqueKey({ projectNo, period }) {
   return [projectNo || '未匹配项目', period || '未定期次'].join('-');
 }
 
+export function deriveProjectDataCompleteness({ projectNo, projectName, currentManager }) {
+  const hasManager = Array.isArray(currentManager)
+    ? currentManager.length > 0
+    : Boolean(String(currentManager || '').trim());
+  return projectNo && projectName && hasManager ? '完整' : '待补充';
+}
+
 export function classifyDashboardGroup(category) {
   const value = String(category || '').trim();
   if (value === '经营项目') return '经营项目总览';
@@ -627,6 +634,11 @@ export function buildProjectOverviewMetricRows({ projects, plans, invoices, toda
         '客户收款状态': projectPaymentStatus({ invoiceAmount, receivedAmount }),
         '开票计划预警': warningStatus({ overdueAmount: invoiceOverdueAmount, nextDate: nextPlan?.date, today }),
         '回款计划预警': warningStatus({ overdueAmount: paymentOverdueAmount, nextDate: nextPaymentDate, today }),
+        '数据完整性状态': deriveProjectDataCompleteness({
+          projectNo: project.projectNo,
+          projectName: project.projectName,
+          currentManager: project.currentManager,
+        }),
         '应收数据粒度': [
           ...(planAgg ? ['计划开票'] : []),
           ...(invoiceAgg ? ['发票明细'] : []),
