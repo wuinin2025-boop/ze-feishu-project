@@ -3,6 +3,10 @@
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import process from 'node:process';
+import {
+  commandFailure,
+  describeFailure,
+} from './rules/control-result-rules.mjs';
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -105,6 +109,10 @@ function runCommand(command) {
 function summarizeRun(syncResult, verifyResult) {
   const sync = syncResult?.json || {};
   const verify = verifyResult?.json || {};
+  const commandFailures = [
+    commandFailure(syncResult, '同步数据'),
+    commandFailure(verifyResult, '核对数据'),
+  ].filter(Boolean);
   return {
     pass: Boolean(syncResult?.ok && verifyResult?.ok && verify.pass !== false),
     sync: {
@@ -113,12 +121,13 @@ function summarizeRun(syncResult, verifyResult) {
       upsert: sync.upsert || {},
       project_people_repairs: sync.project_people_repairs || [],
       project_people_conflicts: sync.project_people_conflicts || [],
+      errors: commandFailures,
     },
     verify: {
       pass: verify.pass,
       counts: verify.counts || {},
       amounts: verify.amounts || {},
-      failures: verify.failures || [],
+      failures: (verify.failures || []).map(describeFailure),
     },
   };
 }
@@ -130,7 +139,18 @@ async function runTask(task) {
   }
   if (task === 'verify') {
     const verify = await runCommand(['npm', 'run', 'verify:invoice']);
-    return { task, steps: [verify], summary: { pass: verify.ok && verify.json?.pass !== false, verify: verify.json } };
+    const failure = commandFailure(verify, '核对数据');
+    return {
+      task,
+      steps: [verify],
+      summary: {
+        pass: verify.ok && verify.json?.pass !== false,
+        verify: {
+          ...(verify.json || {}),
+          failures: failure ? [failure] : (verify.json?.failures || []).map(describeFailure),
+        },
+      },
+    };
   }
   if (task === 'dry-run') {
     const sync = await runCommand(['npm', 'run', 'sync:invoice', '--', '--dry-run']);
@@ -270,8 +290,9 @@ function html() {
       return sections.length ? sections.join('') : '<div class="muted">' + emptyText + '</div>';
     }
 
-    function renderReminders(stats, verify) {
+    function renderReminders(stats, verify, sync) {
       const reminders = [];
+      for (const error of sync.errors || []) reminders.push(error);
       if (Number(stats.amount_exception_plan_rows || 0) > 0) reminders.push('有 ' + stats.amount_exception_plan_rows + ' 条开票计划金额异常，需人工确认。');
       if (Number(stats.unmatched_invoice_rows || 0) > 0) reminders.push('有 ' + stats.unmatched_invoice_rows + ' 条发票未匹配项目、计划外开票或红冲待确认。');
       if (Number(stats.supplier_cost_unmatched_payment_rows || 0) > 0) reminders.push('有 ' + stats.supplier_cost_unmatched_payment_rows + ' 条付款申请未匹配到 PO，需人工确认源_付款申请的关联po字段。');
@@ -299,7 +320,7 @@ function html() {
         '<div class="detail-section"><h3>本次新增记录</h3>' + renderKeyGroup(upsert, 'created_keys', '本次没有新增记录。') + '</div>',
         '<div class="detail-section"><h3>本次更新记录</h3>' + renderKeyGroup(upsert, 'updated_keys', '本次没有更新记录。') + '</div>',
         '<div class="detail-section"><h3>项目人员补齐</h3>' + renderPeople(sync.project_people_repairs, sync.project_people_conflicts) + '</div>',
-        '<div class="detail-section"><h3>需要人工确认</h3>' + renderReminders(stats, verify) + '</div>',
+        '<div class="detail-section"><h3>需要人工确认</h3>' + renderReminders(stats, verify, sync) + '</div>',
       ].join('');
     }
 

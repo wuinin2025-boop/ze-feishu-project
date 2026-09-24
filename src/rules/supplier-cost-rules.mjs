@@ -5,6 +5,15 @@ export function extractApplicationNo(value) {
   return match?.[0] || '';
 }
 
+export function sourceField(fields, ...fieldNames) {
+  for (const fieldName of fieldNames) {
+    if (Object.prototype.hasOwnProperty.call(fields || {}, fieldName)) {
+      return fields[fieldName];
+    }
+  }
+  return undefined;
+}
+
 export function buildSupplierCostKey({ poApplicationNo, paymentApplicationNo }) {
   const poNo = String(poApplicationNo || '').trim();
   const paymentNo = String(paymentApplicationNo || '').trim();

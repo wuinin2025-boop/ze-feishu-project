@@ -25,6 +25,7 @@ import {
   extractApplicationNo,
   isApprovedApplication,
   shouldIncludePaymentApplication,
+  sourceField,
   supplierMatchStatus,
 } from '../rules/supplier-cost-rules.mjs';
 import {
@@ -199,39 +200,6 @@ const SUPPLIER_PAYMENT_FIELDS = [
   '关联付款申请',
   '项目匹配说明',
   '权限_可管理人员',
-];
-
-const PO_APPLICATION_FIELDS = [
-  '申请编号',
-  '申请状态',
-  '发起时间',
-  '完成时间',
-  '项目编号',
-  '项目名称',
-  '该po对客报价金额',
-  '利润',
-  '立项公司',
-  '服务内容1',
-  '金额1',
-  '供应商名称1',
-  'SourceID',
-];
-
-const PAYMENT_APPLICATION_FIELDS = [
-  '申请编号',
-  '申请状态',
-  '发起时间',
-  '完成时间',
-  '付款日期',
-  '关联po',
-  '项目编号1',
-  '项目名称1',
-  '供应商名称',
-  '金额1',
-  '发票情况',
-  '付款事由',
-  '备注',
-  'SourceID',
 ];
 
 const SUPPLIER_COST_STALE_FIELDS = [
@@ -812,14 +780,14 @@ function normalizePoApplication(record) {
     applicationStatus: textValue(fields['申请状态']),
     startedAt: timestampValue(fields['发起时间']),
     completedAt: timestampValue(fields['完成时间']),
-    projectNo: textValue(fields['项目编号']) || textValue(fields['项目编号1']),
-    projectName: textValue(fields['项目名称']) || textValue(fields['项目名称1']),
+    projectNo: textValue(sourceField(fields, '项目编号', '项目编号1')),
+    projectName: textValue(sourceField(fields, '项目名称', '项目名称1')),
     quotedAmount: numberValue(fields['该po对客报价金额']) || 0,
     profitAmount: numberValue(fields['利润']) || 0,
-    companyName: textValue(fields['立项公司']) || textValue(fields['立项公司1']),
-    serviceContent: textValue(fields['服务内容1']),
-    costAmount: numberValue(fields['金额1']) || 0,
-    supplierName: textValue(fields['供应商名称1']),
+    companyName: textValue(sourceField(fields, '立项公司', '立项公司1')),
+    serviceContent: textValue(sourceField(fields, '服务内容', '服务内容1')),
+    costAmount: numberValue(sourceField(fields, '金额', '金额1')) || 0,
+    supplierName: textValue(sourceField(fields, '供应商名称', '供应商名称1')),
   };
 }
 
@@ -834,10 +802,10 @@ function normalizePaymentApplication(record) {
     completedAt: timestampValue(fields['完成时间']),
     expectedPaymentDate: timestampValue(fields['付款日期']),
     linkedPoApplicationNo: extractApplicationNo(textValue(fields['关联po'])),
-    projectNo: textValue(fields['项目编号1']),
-    projectName: textValue(fields['项目名称1']),
+    projectNo: textValue(sourceField(fields, '项目编号', '项目编号1')),
+    projectName: textValue(sourceField(fields, '项目名称', '项目名称1')),
     supplierName: textValue(fields['供应商名称']),
-    amount: numberValue(fields['金额1']) || 0,
+    amount: numberValue(sourceField(fields, '金额', '金额1')) || 0,
     invoiceStatus: textValue(fields['发票情况']),
     remark: textValue(fields['付款事由']) || textValue(fields['备注']),
   };
@@ -1358,8 +1326,8 @@ try {
     oldProjectPlanTableId ? searchAll(client, APP_TOKEN, oldProjectPlanTableId, OLD_PROJECT_PLAN_FIELDS) : [],
     supplierPaymentTableId ? searchAll(client, APP_TOKEN, supplierPaymentTableId, SUPPLIER_PAYMENT_FIELDS) : [],
     searchAll(client, APP_TOKEN, tableIds.get(TARGET_TABLE_NAMES.projectProgress), PROJECT_PROGRESS_FIELDS),
-    searchAll(client, APP_TOKEN, SOURCE_TABLES.po, PO_APPLICATION_FIELDS),
-    searchAll(client, APP_TOKEN, SOURCE_TABLES.payment, PAYMENT_APPLICATION_FIELDS),
+    searchAll(client, APP_TOKEN, SOURCE_TABLES.po),
+    searchAll(client, APP_TOKEN, SOURCE_TABLES.payment),
     Promise.all(SOURCE_TABLES.projectLedgers.map((source) => searchAll(client, APP_TOKEN, source.id)
       .then((records) => records.map((record) => normalizeLedgerProject(source, record))))),
     ...SOURCE_TABLES.invoices.map((source) => searchAll(client, APP_TOKEN, source.id, INVOICE_FIELDS)

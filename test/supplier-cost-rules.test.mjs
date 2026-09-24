@@ -9,8 +9,15 @@ import {
   extractApplicationNo,
   isApprovedApplication,
   shouldIncludePaymentApplication,
+  sourceField,
   supplierMatchStatus,
 } from '../src/rules/supplier-cost-rules.mjs';
+
+test('reads renamed source fields with new name first and old name as fallback', () => {
+  assert.equal(sourceField({ '项目编号': 'NEW', '项目编号1': 'OLD' }, '项目编号', '项目编号1'), 'NEW');
+  assert.equal(sourceField({ '项目编号1': 'OLD' }, '项目编号', '项目编号1'), 'OLD');
+  assert.equal(sourceField({ '金额': 0, '金额1': 100 }, '金额', '金额1'), 0);
+});
 
 test('extracts PO application number from payment link text', () => {
   assert.equal(extractApplicationNo('202510090004-杨波-PO申请-2025-10-09 18:09:48'), '202510090004');
