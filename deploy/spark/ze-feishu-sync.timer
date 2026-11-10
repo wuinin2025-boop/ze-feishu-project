@@ -1,0 +1,12 @@
+[Unit]
+Description=ZE Feishu sync at 09:00 and 17:00 Beijing time
+
+[Timer]
+OnCalendar=*-*-* 09:00:00 Asia/Shanghai
+OnCalendar=*-*-* 17:00:00 Asia/Shanghai
+Persistent=true
+RandomizedDelaySec=0
+Unit=ze-feishu-sync.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=ZE Feishu control console
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/ze-feishu-xiangmuzhongxin
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=CODEX_CONFIG_PATH=%h/.config/ze-feishu-project/feishu-config.toml
+Environment=INVOICE_VERIFICATION_REPORT_PATH=%h/.local/state/ze-feishu-project/invoice-verification.md
+EnvironmentFile=%h/.config/ze-feishu-project/control.env
+ExecStart=%h/.local/bin/node src/control-server.mjs
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

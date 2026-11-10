@@ -1,0 +1,16 @@
+[Unit]
+Description=ZE Feishu scheduled sync
+After=network-online.target
+StartLimitIntervalSec=1800
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/ze-feishu-xiangmuzhongxin
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=CODEX_CONFIG_PATH=%h/.config/ze-feishu-project/feishu-config.toml
+Environment=INVOICE_VERIFICATION_REPORT_PATH=%h/.local/state/ze-feishu-project/invoice-verification.md
+ExecStart=/usr/bin/flock -n %h/.config/ze-feishu-project/sync.lock /bin/bash -c 'npm run sync:invoice && npm run verify:invoice'
+TimeoutStartSec=900
+Restart=on-failure
+RestartSec=300

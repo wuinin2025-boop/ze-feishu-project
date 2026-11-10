@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   APP_TOKEN,
@@ -22,7 +23,8 @@ import {
   timestampValue,
 } from './client.mjs';
 
-const REPORT_PATH = fileURLToPath(new URL('../../docs/trial-results/2026-07-31-invoice-model-verification.md', import.meta.url));
+const REPORT_PATH = process.env.INVOICE_VERIFICATION_REPORT_PATH
+  || fileURLToPath(new URL('../../docs/trial-results/2026-07-31-invoice-model-verification.md', import.meta.url));
 
 const SOURCE_INVOICE_FIELDS = [
   '发票号码',
@@ -205,6 +207,19 @@ try {
   const staleDetailKeys = detailRows
     .map((row) => textValue(row.fields?.['明细唯一键']))
     .filter((key) => key && !sourceDetailKeys.has(key));
+  const detailsByKey = new Map(detailRows.map((row) => [textValue(row.fields?.['明细唯一键']), row]));
+  const missingSourceKeys = sourceInvoices.filter((invoice) => !detailsByKey.has(invoice.detailKey));
+  const mismatchedDetailRows = sourceInvoices.flatMap((invoice) => {
+    const row = detailsByKey.get(invoice.detailKey);
+    if (!row) return [];
+    const fields = row.fields || {};
+    const different = [];
+    if (textValue(fields['项目编号']) !== invoice.projectNo) different.push('项目编号');
+    if (Math.abs((numberValue(fields['开票金额']) || 0) - invoice.invoiceAmount) >= 0.01) different.push('开票金额');
+    if (Math.abs((numberValue(fields['收款金额']) || 0) - invoice.receivedAmount) >= 0.01) different.push('收款金额');
+    if (invoice.duplicateInvoiceNote && !textValue(fields['备注']).includes(invoice.duplicateInvoiceNote)) different.push('跨项目备注');
+    return different.length ? [{ key: invoice.detailKey, fields: different }] : [];
+  });
 
   const sourceIncludedInvoice = includedSourceInvoices.reduce((total, invoice) => total + (invoice.invoiceAmount || 0), 0);
   const sourceIncludedReceived = includedSourceInvoices.reduce((total, invoice) => total + (invoice.receivedAmount || 0), 0);
@@ -223,7 +238,9 @@ try {
   check('明细唯一键不为空', blankDetailKeys.length === 0, `blank=${blankDetailKeys.length}`);
   check('计划唯一键不重复', duplicatePlanKeys.length === 0, JSON.stringify(duplicatePlanKeys.slice(0, 5)));
   check('明细唯一键不重复', duplicateDetailKeys.length === 0, JSON.stringify(duplicateDetailKeys.slice(0, 5)));
-  check('源发票编号不重复', duplicateSourceInvoiceKeys.length === 0, JSON.stringify(duplicateSourceInvoiceKeys.slice(0, 5)));
+  check('源发票按项目区分后的明细标识不重复', duplicateSourceInvoiceKeys.length === 0, JSON.stringify(duplicateSourceInvoiceKeys.slice(0, 5)));
+  check('每条源发票均有对应统一明细', missingSourceKeys.length === 0, JSON.stringify(missingSourceKeys.map((row) => row.detailKey).slice(0, 5)));
+  check('逐条项目归属金额及跨项目备注一致', mismatchedDetailRows.length === 0, JSON.stringify(mismatchedDetailRows.slice(0, 5)));
   check('统一明细开票金额等于源发票抵消后金额', Math.abs(detailIncludedInvoice - sourceIncludedInvoice) < 0.01, `detail=${detailIncludedInvoice}, source=${sourceIncludedInvoice}`);
   check('统一明细收款金额等于源发票抵消后金额', Math.abs(detailIncludedReceived - sourceIncludedReceived) < 0.01, `detail=${detailIncludedReceived}, source=${sourceIncludedReceived}`);
   check('统一明细不存在源表已删除记录', staleDetailKeys.length === 0, JSON.stringify(staleDetailKeys.slice(0, 5)));
@@ -263,6 +280,7 @@ try {
     匹配状态: textValue(row.fields?.['匹配状态']),
   }));
 
+  fs.mkdirSync(path.dirname(REPORT_PATH), { recursive: true });
   fs.writeFileSync(REPORT_PATH, markdown(report, {
     amountExceptionRows: compact(amountExceptionRows),
     hankookRows: compact(hankookRows),
