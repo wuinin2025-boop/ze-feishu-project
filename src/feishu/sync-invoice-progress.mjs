@@ -13,10 +13,14 @@ import {
   deriveProfitRateWarning,
   deriveProjectLifecycle,
   deriveProjectStages,
+  disambiguateInvoiceDetailKeys,
   matchInvoicesToPlans,
   normalizeInvoiceNo,
 } from '../rules/invoice-progress-rules.mjs';
-import { changedUpdateFields } from '../rules/sync-diff-rules.mjs';
+import {
+  changedUpdateFields,
+  staleOrDuplicateRecordIds,
+} from '../rules/sync-diff-rules.mjs';
 import {
   buildSupplierCostKey,
   deduplicateSupplierPayments,
@@ -1001,7 +1005,7 @@ function buildInvoiceRows(invoices) {
     '异常原因': invoice.invoiceNoMissing ? '发票编号缺失' : '',
     '源表名称': invoice.sourceName,
     '源记录ID': invoice.sourceId,
-    '备注': invoice.remark,
+    '备注': [...new Set([invoice.remark, invoice.duplicateInvoiceNote].filter(Boolean))].join('；'),
     '最近同步时间': NOW,
   }));
 }
@@ -1064,12 +1068,11 @@ function buildInvoicePlanLinkUpdates(matchedInvoices, detailRecordIdsByKey, plan
 }
 
 function staleInvoiceDetailRecordIds(existingDetailRows, currentDetailRows) {
-  const currentKeys = new Set(currentDetailRows.map((row) => textValue(row['明细唯一键'])).filter(Boolean));
-  return existingDetailRows.flatMap((row) => {
-    const key = textValue(row.fields?.['明细唯一键']);
-    if (!key || currentKeys.has(key)) return [];
-    return [row.record_id];
-  });
+  return staleOrDuplicateRecordIds(
+    existingDetailRows,
+    currentDetailRows.map((row) => textValue(row['明细唯一键'])),
+    '明细唯一键',
+  );
 }
 
 function buildProjectOverviewUpdateRows(projects, matched) {
@@ -1337,7 +1340,10 @@ try {
       .filter((record) => textValue(record.fields?.['申请状态']) === '已通过')
       .map(normalizeEstablishmentProject),
   ]);
-  const projectOverviewSourceRows = mergedProjectOverview.rows;
+  const projectOverviewSourceRows = mergedProjectOverview.rows.map((row) => ({
+    ...row,
+    '项目分类管理': '经营项目',
+  }));
   const projectPeopleRepairs = plannedProjectPeopleRepairs(
     existingProjectOverviewRecords,
     projectOverviewSourceRows,
@@ -1352,6 +1358,7 @@ try {
     {
       createOnlyFields: ['项目阶段', '已收款金额'],
       fillEmptyFields: ['当前项目负责人', '项目参与人员'],
+      fillDefaultFields: { '项目分类管理': ['选择项目类型'] },
       ignoredDiffFields: ['源记录ID'],
       clearableFields: ['立项金额', '立项成本', '立项毛利', '立项毛利率'],
     },
@@ -1463,7 +1470,7 @@ try {
 
   const { plans, invoices } = attachProjects(
     mergePlanRows(sourcePlans.rows, manualOldPlans.rows),
-    invoiceSources.flat(),
+    disambiguateInvoiceDetailKeys(invoiceSources.flat()),
     projectOverviewRows,
   );
   const matched = matchInvoicesToPlans(plans, invoices, { today: NOW });

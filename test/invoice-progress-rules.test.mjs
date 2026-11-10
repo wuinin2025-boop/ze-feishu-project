@@ -20,6 +20,7 @@ import {
   deriveProfitRateWarning,
   deriveProjectStatus,
   deriveProjectStages,
+  disambiguateInvoiceDetailKeys,
   matchInvoicesToPlans,
   normalizeInvoiceNo,
 } from '../src/rules/invoice-progress-rules.mjs';
@@ -175,6 +176,32 @@ test('invoice collection titles replace blank first fields', () => {
     buildInvoiceCollectionTitle({ sourceName: '冶堂开票明细', sourceId: 'recB' }),
     '冶堂开票明细|recB',
   );
+});
+
+test('same invoice number on different projects keeps both records and adds a note', () => {
+  const rows = disambiguateInvoiceDetailKeys([
+    {
+      sourceName: '集熠开票明细',
+      sourceId: 'recA',
+      invoiceNo: '26312000006472794691',
+      projectNo: 'W260623LS',
+      invoiceAmount: 97838,
+    },
+    {
+      sourceName: '集熠开票明细',
+      sourceId: 'recB',
+      invoiceNo: '26312000006472794691',
+      projectNo: 'W260917LS',
+      invoiceAmount: 30740,
+    },
+  ]);
+
+  assert.deepEqual(rows.map((row) => row.detailKey), [
+    '集熠开票明细|26312000006472794691|W260623LS',
+    '集熠开票明细|26312000006472794691|W260917LS',
+  ]);
+  assert.equal(rows[0].duplicateInvoiceNote, '同一发票编号对应多个项目：W260623LS、W260917LS');
+  assert.equal(rows[1].duplicateInvoiceNote, rows[0].duplicateInvoiceNote);
 });
 
 test('overall status prioritizes amount, payment and invoice alerts', () => {

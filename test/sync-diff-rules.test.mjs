@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { changedUpdateFields } from '../src/rules/sync-diff-rules.mjs';
+import {
+  changedUpdateFields,
+  staleOrDuplicateRecordIds,
+} from '../src/rules/sync-diff-rules.mjs';
 
 test('unchanged rows do not refresh recent sync time', () => {
   const result = changedUpdateFields(
@@ -158,4 +161,56 @@ test('source id is refreshed when a business field changes', () => {
     源记录ID: 'new',
     最近同步时间: today,
   });
+});
+
+test('default project category fills placeholders but preserves manual categories', () => {
+  const options = {
+    fillDefaultFields: { '项目分类管理': ['选择项目类型'] },
+  };
+
+  assert.equal(
+    changedUpdateFields(
+      { '项目分类管理': '选择项目类型' },
+      { '项目分类管理': '经营项目' },
+      options,
+    )['项目分类管理'],
+    '经营项目',
+  );
+  assert.equal(
+    changedUpdateFields(
+      { '项目分类管理': '' },
+      { '项目分类管理': '经营项目' },
+      options,
+    )['项目分类管理'],
+    '经营项目',
+  );
+  assert.deepEqual(
+    changedUpdateFields(
+      { '项目分类管理': '走账项目' },
+      { '项目分类管理': '经营项目' },
+      options,
+    ),
+    {},
+  );
+  assert.deepEqual(
+    changedUpdateFields(
+      { '项目分类管理': '行政/内部项目' },
+      { '项目分类管理': '经营项目' },
+      options,
+    ),
+    {},
+  );
+});
+
+test('removes stale records and keeps the last record for a duplicate current key', () => {
+  const records = [
+    { record_id: 'old-duplicate', fields: { '明细唯一键': 'INV-1' } },
+    { record_id: 'kept-current', fields: { '明细唯一键': 'INV-1' } },
+    { record_id: 'stale', fields: { '明细唯一键': 'INV-OLD' } },
+  ];
+
+  assert.deepEqual(
+    staleOrDuplicateRecordIds(records, ['INV-1'], '明细唯一键'),
+    ['stale', 'old-duplicate'],
+  );
 });

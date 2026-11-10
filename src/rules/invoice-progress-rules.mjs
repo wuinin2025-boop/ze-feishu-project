@@ -122,6 +122,40 @@ export function buildInvoiceDetailKey(invoice) {
   return [sourceName, '发票编号缺失', projectNo || '未匹配项目', sourceId || invoiceDate || invoiceAmount].join('|');
 }
 
+export function disambiguateInvoiceDetailKeys(invoices) {
+  const rows = invoices.map((invoice) => ({
+    ...invoice,
+    detailKey: invoice.detailKey || buildInvoiceDetailKey(invoice),
+  }));
+  const groups = new Map();
+  for (const row of rows) {
+    const group = groups.get(row.detailKey) || [];
+    group.push(row);
+    groups.set(row.detailKey, group);
+  }
+
+  for (const [baseKey, group] of groups) {
+    if (group.length < 2) continue;
+    const projects = [...new Set(group.map((row) => String(row.projectNo || '').trim()).filter(Boolean))];
+    const projectCounts = new Map();
+    for (const row of group) {
+      const projectNo = String(row.projectNo || '').trim() || '未匹配项目';
+      projectCounts.set(projectNo, (projectCounts.get(projectNo) || 0) + 1);
+    }
+    for (const row of group) {
+      const projectNo = String(row.projectNo || '').trim() || '未匹配项目';
+      const sourceSuffix = projectCounts.get(projectNo) > 1
+        ? `|${String(row.sourceId || row.invoiceDate || row.invoiceAmount || '').trim() || '记录待核对'}`
+        : '';
+      row.detailKey = `${baseKey}|${projectNo}${sourceSuffix}`;
+      row.duplicateInvoiceNote = projects.length > 1
+        ? `同一发票编号对应多个项目：${projects.join('、')}`
+        : '同一发票编号在同一项目存在多条记录，请核对';
+    }
+  }
+  return rows;
+}
+
 export function deriveOverdueDays({ date, today = Date.now(), active = true }) {
   if (!active || !date) return 0;
   return Math.max(Math.floor((today - date) / DAY_MS), 0);

@@ -6,6 +6,14 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const CONFIG_PATH = process.env.CODEX_CONFIG_PATH || path.join(os.homedir(), '.codex', 'config.toml');
+const DEFAULT_FEISHU_MCP_TIMEOUT_MS = 180_000;
+
+function feishuMcpTimeoutMs() {
+  const configured = Number(process.env.FEISHU_MCP_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_FEISHU_MCP_TIMEOUT_MS;
+}
 
 function readSection(text, sectionName) {
   const header = `[${sectionName}]`;
@@ -92,7 +100,11 @@ export async function callFeishuOpenApi(apiPath, { method = 'GET', data } = {}) 
 }
 
 export async function callJson(client, name, args) {
-  const result = await client.callTool({ name, arguments: args });
+  const result = await client.callTool(
+    { name, arguments: args },
+    undefined,
+    { timeout: feishuMcpTimeoutMs(), resetTimeoutOnProgress: true },
+  );
   const text = result.content?.find((item) => item.type === 'text')?.text;
   let data = result;
   if (text) {

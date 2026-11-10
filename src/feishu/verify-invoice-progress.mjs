@@ -9,6 +9,7 @@ import {
 } from '../config.mjs';
 import {
   buildInvoiceDetailKey,
+  disambiguateInvoiceDetailKeys,
   markOffsetInvoices,
   normalizeInvoiceNo,
 } from '../rules/invoice-progress-rules.mjs';
@@ -66,6 +67,24 @@ function duplicateValues(rows, fieldName) {
     counts.set(value, (counts.get(value) || 0) + 1);
   }
   return [...counts].filter(([, count]) => count > 1).map(([value, count]) => ({ value, count }));
+}
+
+function duplicateSourceKeys(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    if (!row.detailKey) continue;
+    const group = groups.get(row.detailKey) || [];
+    group.push(row);
+    groups.set(row.detailKey, group);
+  }
+  return [...groups]
+    .filter(([, group]) => group.length > 1)
+    .map(([value, group]) => ({
+      value,
+      count: group.length,
+      projects: group.map((row) => row.projectNo).filter(Boolean),
+      amounts: group.map((row) => row.invoiceAmount),
+    }));
 }
 
 function sum(rows, fieldName) {
@@ -169,13 +188,15 @@ try {
     projectOverviewTableId ? searchAll(client, APP_TOKEN, projectOverviewTableId, PROJECT_OVERVIEW_VERIFY_FIELDS) : [],
     oldPlanTableId ? searchAll(client, APP_TOKEN, oldPlanTableId, ['记录标识']) : [],
     Promise.all(SOURCE_TABLES.invoices.map((source) => searchAll(client, APP_TOKEN, source.id, SOURCE_INVOICE_FIELDS)
-      .then((records) => records.map((record) => normalizeSourceInvoice(source, record))))).then((groups) => groups.flat()),
+      .then((records) => records.map((record) => normalizeSourceInvoice(source, record)))))
+      .then((groups) => disambiguateInvoiceDetailKeys(groups.flat())),
   ]);
 
   const blankPlanKeys = planRows.filter((row) => !textValue(row.fields?.['计划唯一键']));
   const blankDetailKeys = detailRows.filter((row) => !textValue(row.fields?.['明细唯一键']));
   const duplicatePlanKeys = duplicateValues(planRows, '计划唯一键');
   const duplicateDetailKeys = duplicateValues(detailRows, '明细唯一键');
+  const duplicateSourceInvoiceKeys = duplicateSourceKeys(sourceInvoices);
 
   const offsetSources = markOffsetInvoices(sourceInvoices);
   const includedSourceInvoices = offsetSources.filter((invoice) => invoice.includedInStats);
@@ -202,6 +223,7 @@ try {
   check('明细唯一键不为空', blankDetailKeys.length === 0, `blank=${blankDetailKeys.length}`);
   check('计划唯一键不重复', duplicatePlanKeys.length === 0, JSON.stringify(duplicatePlanKeys.slice(0, 5)));
   check('明细唯一键不重复', duplicateDetailKeys.length === 0, JSON.stringify(duplicateDetailKeys.slice(0, 5)));
+  check('源发票编号不重复', duplicateSourceInvoiceKeys.length === 0, JSON.stringify(duplicateSourceInvoiceKeys.slice(0, 5)));
   check('统一明细开票金额等于源发票抵消后金额', Math.abs(detailIncludedInvoice - sourceIncludedInvoice) < 0.01, `detail=${detailIncludedInvoice}, source=${sourceIncludedInvoice}`);
   check('统一明细收款金额等于源发票抵消后金额', Math.abs(detailIncludedReceived - sourceIncludedReceived) < 0.01, `detail=${detailIncludedReceived}, source=${sourceIncludedReceived}`);
   check('统一明细不存在源表已删除记录', staleDetailKeys.length === 0, JSON.stringify(staleDetailKeys.slice(0, 5)));

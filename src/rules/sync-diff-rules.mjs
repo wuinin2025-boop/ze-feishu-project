@@ -60,14 +60,24 @@ function isEmptyFieldValue(value) {
   return false;
 }
 
+function isDefaultableFieldValue(value, placeholders = []) {
+  if (isEmptyFieldValue(value)) return true;
+  const current = comparableFieldValue(value);
+  return placeholders.some((placeholder) => comparableFieldValue(placeholder) === current);
+}
+
 export function changedUpdateFields(existingFields, nextFields, options = {}) {
   const createOnlyFields = new Set(options.createOnlyFields || []);
   const fillEmptyFields = new Set(options.fillEmptyFields || []);
+  const fillDefaultFields = options.fillDefaultFields || {};
   const ignoredDiffFields = new Set(options.ignoredDiffFields || []);
   const fields = cleanUpdateFieldsWithClears(nextFields, options.clearableFields || []);
   for (const fieldName of createOnlyFields) delete fields[fieldName];
   for (const fieldName of fillEmptyFields) {
     if (!isEmptyFieldValue(existingFields?.[fieldName])) delete fields[fieldName];
+  }
+  for (const [fieldName, placeholders] of Object.entries(fillDefaultFields)) {
+    if (!isDefaultableFieldValue(existingFields?.[fieldName], placeholders)) delete fields[fieldName];
   }
   const changedEntries = Object.entries(fields)
     .filter(([fieldName, value]) => (
@@ -87,4 +97,27 @@ export function changedUpdateFields(existingFields, nextFields, options = {}) {
   if (Object.hasOwn(fields, LAST_SYNC_FIELD)) changed[LAST_SYNC_FIELD] = fields[LAST_SYNC_FIELD];
   if (Object.hasOwn(fields, '源更新时间')) changed['源更新时间'] = fields['源更新时间'];
   return changed;
+}
+
+export function staleOrDuplicateRecordIds(existingRecords, currentKeys, keyField) {
+  const desiredKeys = new Set(currentKeys.filter(Boolean));
+  const groups = new Map();
+  const stale = [];
+
+  for (const record of existingRecords) {
+    const key = comparableFieldValue(record.fields?.[keyField]);
+    if (!key || !desiredKeys.has(key)) {
+      stale.push(record.record_id);
+      continue;
+    }
+    const group = groups.get(key) || [];
+    group.push(record);
+    groups.set(key, group);
+  }
+
+  for (const group of groups.values()) {
+    if (group.length > 1) stale.push(...group.slice(0, -1).map((record) => record.record_id));
+  }
+
+  return [...new Set(stale)];
 }
