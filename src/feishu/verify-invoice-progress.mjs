@@ -13,6 +13,7 @@ import {
   disambiguateInvoiceDetailKeys,
   markOffsetInvoices,
   normalizeInvoiceNo,
+  resolveProjectPreEstablishmentAmount,
 } from '../rules/invoice-progress-rules.mjs';
 import {
   callJson,
@@ -40,6 +41,8 @@ const SOURCE_INVOICE_FIELDS = [
 const PROJECT_OVERVIEW_VERIFY_FIELDS = [
   '项目编号',
   '项目分类管理',
+  '立项公司',
+  '预立项金额',
 ];
 
 async function listTables(client) {
@@ -184,7 +187,7 @@ try {
   check('项目开票计划表存在', Boolean(planTableId), planTableId || 'missing');
   check('开票明细统一表存在', Boolean(detailTableId), detailTableId || 'missing');
 
-  const [planRows, detailRows, projectOverviewRows, oldPlanRows, sourceInvoices] = await Promise.all([
+  const [planRows, detailRows, projectOverviewRows, oldPlanRows, sourceInvoices, preEstablishmentLedgers] = await Promise.all([
     planTableId ? searchAll(client, APP_TOKEN, planTableId) : [],
     detailTableId ? searchAll(client, APP_TOKEN, detailTableId) : [],
     projectOverviewTableId ? searchAll(client, APP_TOKEN, projectOverviewTableId, PROJECT_OVERVIEW_VERIFY_FIELDS) : [],
@@ -192,6 +195,14 @@ try {
     Promise.all(SOURCE_TABLES.invoices.map((source) => searchAll(client, APP_TOKEN, source.id, SOURCE_INVOICE_FIELDS)
       .then((records) => records.map((record) => normalizeSourceInvoice(source, record)))))
       .then((groups) => disambiguateInvoiceDetailKeys(groups.flat())),
+    Promise.all(SOURCE_TABLES.projectLedgers.filter((source) => source.company !== '冶堂').map(async (source) => {
+      const records = await searchAll(client, APP_TOKEN, source.id, ['项目编号', '预立项金额']);
+      return records.map((record) => ({
+        sourceName: source.name,
+        projectNo: textValue(record.fields?.['项目编号']),
+        amount: numberValue(record.fields?.['预立项金额']),
+      }));
+    })).then((groups) => groups.flat()),
   ]);
 
   const blankPlanKeys = planRows.filter((row) => !textValue(row.fields?.['计划唯一键']));
@@ -233,6 +244,21 @@ try {
   const hankookRows = detailRows.filter((row) => textValue(row.fields?.['客户名称']) === 'Hankook & Company Co., Ltd');
   const badHankookRows = hankookRows.filter((row) => textValue(row.fields?.['发票编号显示值']) !== 'Hankook 001');
   const amountExceptionRows = planRows.filter((row) => textValue(row.fields?.['匹配状态']) === '金额异常待确认');
+  const preEstablishmentByProject = new Map();
+  for (const row of preEstablishmentLedgers) {
+    if (!row.projectNo) continue;
+    preEstablishmentByProject.set(row.projectNo, [...(preEstablishmentByProject.get(row.projectNo) || []), row]);
+  }
+  const preEstablishmentMismatches = projectOverviewRows.flatMap((row) => {
+    const projectNo = textValue(row.fields?.['项目编号']);
+    const expected = resolveProjectPreEstablishmentAmount({
+      companyName: textValue(row.fields?.['立项公司']),
+      ledgerRows: preEstablishmentByProject.get(projectNo),
+    });
+    const actual = numberValue(row.fields?.['预立项金额']);
+    const matches = expected === null ? actual === undefined : actual !== undefined && Math.abs(actual - expected) < 0.01;
+    return matches ? [] : [{ projectNo, expected, actual: actual ?? null }];
+  });
 
   check('计划唯一键不为空', blankPlanKeys.length === 0, `blank=${blankPlanKeys.length}`);
   check('明细唯一键不为空', blankDetailKeys.length === 0, `blank=${blankDetailKeys.length}`);
@@ -246,6 +272,7 @@ try {
   check('统一明细不存在源表已删除记录', staleDetailKeys.length === 0, JSON.stringify(staleDetailKeys.slice(0, 5)));
   check('行政/内部项目不进入老板驾驶舱经营或走账分组', adminInDashboardRows.length === 0, `rows=${adminInDashboardRows.length}`);
   check('Hankook 空发票号使用默认显示值', badHankookRows.length === 0, `bad=${badHankookRows.length}, hankook=${hankookRows.length}`);
+  check('预立项金额对应集熠亦所台账且冶堂为空', preEstablishmentMismatches.length === 0, JSON.stringify(preEstablishmentMismatches.slice(0, 5)));
 
   const report = {
     pass: failures.length === 0,

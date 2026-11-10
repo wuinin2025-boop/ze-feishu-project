@@ -23,7 +23,30 @@ import {
   disambiguateInvoiceDetailKeys,
   matchInvoicesToPlans,
   normalizeInvoiceNo,
+  resolveProjectPreEstablishmentAmount,
 } from '../src/rules/invoice-progress-rules.mjs';
+
+test('pre-establishment amounts only use the two requested ledgers and preserve zero', () => {
+  for (const sourceName of ['源_集熠项目台账', '源_亦所项目台账']) {
+    assert.equal(resolveProjectPreEstablishmentAmount({
+      companyName: sourceName.includes('集熠') ? '集熠武汉' : '亦所',
+      ledgerRows: [{ sourceName, amount: 120000 }],
+    }), 120000);
+    assert.equal(resolveProjectPreEstablishmentAmount({
+      ledgerRows: [{ sourceName, amount: 0 }],
+    }), 0);
+  }
+  assert.equal(resolveProjectPreEstablishmentAmount({
+    companyName: '冶堂',
+    ledgerRows: [{ sourceName: '源_集熠项目台账', amount: 120000 }],
+  }), null);
+  assert.equal(resolveProjectPreEstablishmentAmount({
+    ledgerRows: [{ sourceName: '源_立项申请', amount: 120000 }],
+  }), null);
+  assert.equal(resolveProjectPreEstablishmentAmount({
+    ledgerRows: [{ sourceName: '源_亦所项目台账', amount: undefined }],
+  }), null);
+});
 
 test('cutoff rules are explicit', () => {
   assert.equal(classifyApplication('202607270005'), 'old');

@@ -83,7 +83,11 @@ export function changedUpdateFields(existingFields, nextFields, options = {}) {
     .filter(([fieldName, value]) => (
       !TIME_ONLY_FIELDS.has(fieldName)
       && !ignoredDiffFields.has(fieldName)
-      && fieldChanged(existingFields, fieldName, value)
+      && (
+        (options.distinguishEmptyFields?.includes(fieldName)
+          && isEmptyFieldValue(existingFields?.[fieldName]) !== isEmptyFieldValue(value))
+        || fieldChanged(existingFields, fieldName, value)
+      )
     ));
   if (!changedEntries.length) {
     return {};

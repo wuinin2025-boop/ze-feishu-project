@@ -82,6 +82,12 @@ export function dashboardGroupForCategory(category) {
   return ['经营项目总览', '走账项目总览'].includes(group) ? group : '';
 }
 
+export function resolveProjectPreEstablishmentAmount({ companyName, ledgerRows = [] }) {
+  if (String(companyName || '').trim() === '冶堂') return null;
+  const source = ledgerRows.filter((row) => ['源_集熠项目台账', '源_亦所项目台账'].includes(row.sourceName)).at(-1);
+  return typeof source?.amount === 'number' && Number.isFinite(source.amount) ? source.amount : null;
+}
+
 export function normalizeInvoiceNo({ customerName, invoiceNo }) {
   const rawInvoiceNo = String(invoiceNo || '').trim();
   const normalizedCustomerName = String(customerName || '').trim();

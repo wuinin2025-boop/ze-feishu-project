@@ -16,6 +16,7 @@ import {
   disambiguateInvoiceDetailKeys,
   matchInvoicesToPlans,
   normalizeInvoiceNo,
+  resolveProjectPreEstablishmentAmount,
 } from '../rules/invoice-progress-rules.mjs';
 import {
   changedUpdateFields,
@@ -91,6 +92,7 @@ const PROJECT_LEDGER_FIELDS = [
   '客户关联',
   '客户名称文本',
   '立项金额',
+  '预立项金额',
   '立项成本',
   'PO成本',
   '结算金额',
@@ -473,6 +475,10 @@ function normalizeLedgerProject(source, record) {
   return {
     projectNo,
     peopleSource: 'ledger',
+    preEstablishmentSource: {
+      sourceName: source.name,
+      amount: numberValue(fields['预立项金额']),
+    },
     people: { manager: manager || [], participants: [] },
     row: {
       '项目编号': projectNo,
@@ -599,6 +605,10 @@ function mergeProjectRows(projectRows) {
       existing = merged;
     }
 
+    existing['预立项金额'] = resolveProjectPreEstablishmentAmount({
+      companyName: textValue(existing['立项公司']),
+      ledgerRows: items.map((item) => item.preEstablishmentSource).filter(Boolean),
+    });
     const people = resolveProjectPeople({
       establishmentRows: items.filter((item) => item.peopleSource === 'establishment').map((item) => item.people),
       ledgerRows: items.filter((item) => item.peopleSource === 'ledger').map((item) => item.people),
@@ -1360,7 +1370,8 @@ try {
       fillEmptyFields: ['当前项目负责人', '项目参与人员'],
       fillDefaultFields: { '项目分类管理': ['选择项目类型'] },
       ignoredDiffFields: ['源记录ID'],
-      clearableFields: ['立项金额', '立项成本', '立项毛利', '立项毛利率'],
+      distinguishEmptyFields: ['预立项金额'],
+      clearableFields: ['预立项金额', '立项金额', '立项成本', '立项毛利', '立项毛利率'],
     },
   );
 

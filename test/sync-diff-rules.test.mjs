@@ -202,6 +202,18 @@ test('default project category fills placeholders but preserves manual categorie
   );
 });
 
+test('pre-establishment zero is distinct from empty and source clearing removes old amounts', () => {
+  const options = {
+    clearableFields: ['预立项金额'],
+    distinguishEmptyFields: ['预立项金额'],
+  };
+  assert.deepEqual(changedUpdateFields({}, { 预立项金额: 0 }, options), { 预立项金额: 0 });
+  assert.deepEqual(changedUpdateFields({ 预立项金额: 0 }, { 预立项金额: null }, options), { 预立项金额: null });
+  assert.deepEqual(changedUpdateFields({ 预立项金额: 1200 }, { 预立项金额: null }, options), { 预立项金额: null });
+  assert.deepEqual(changedUpdateFields({ 预立项金额: 0 }, { 预立项金额: 0 }, options), {});
+  assert.deepEqual(changedUpdateFields({}, { 预立项金额: null }, options), {});
+});
+
 test('removes stale records and keeps the last record for a duplicate current key', () => {
   const records = [
     { record_id: 'old-duplicate', fields: { '明细唯一键': 'INV-1' } },

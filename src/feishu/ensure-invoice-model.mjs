@@ -117,6 +117,7 @@ const PROJECT_OVERVIEW_DESCRIPTIONS = {
   最后负责人更新时间: '负责人变更辅助字段；当前本地同步脚本不写入。',
   未关闭风险数: '本地同步按项目进度表汇总：风险等级为低/中/高且任务状态不是已完成、已取消的任务数量。',
   立项金额: '来源：项目台账或审批通过的源_立项申请；表示项目立项口径金额，不与结算金额混用。',
+  预立项金额: '按项目编号同步源_集熠项目台账、源_亦所项目台账的预立项金额；源值为0则保留0，源值为空或无对应台账则留空；立项公司为冶堂时始终留空。不取立项申请金额兜底，不计入正式立项、开票或回款金额。仅真实变化时更新时间。',
   立项成本: '来源：项目台账或审批通过的源_立项申请；表示项目立项口径成本。',
   结算金额: '来源：项目台账或审批通过的源_立项申请；表示项目结算口径开票金额，允许与立项金额不同。',
   结算成本: '来源：项目台账或审批通过的源_立项申请；表示项目结算口径成本。',
@@ -560,6 +561,14 @@ async function ensureInvoiceModel(client) {
   }
 
   const overviewFields = new Map((await listFields(client, projectOverviewId)).map((fieldItem) => [fieldItem.field_name, fieldItem]));
+  await ensureField(
+    client,
+    TARGET_TABLE_NAMES.projectOverview,
+    projectOverviewId,
+    overviewFields,
+    number('预立项金额', PROJECT_OVERVIEW_DESCRIPTIONS.预立项金额),
+    report,
+  );
   await ensureFieldDescriptions(
     client,
     TARGET_TABLE_NAMES.projectOverview,
